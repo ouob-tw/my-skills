@@ -1,0 +1,4 @@
+interface:
+  display_name: "Import Product Serials"
+  short_description: "Import serial inventory through EasyStore API"
+  default_prompt: "Use $import-product-serials to plan and import product serials into EasyStore with supplier, cost, and batch verification."

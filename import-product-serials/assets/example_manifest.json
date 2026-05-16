@@ -1,0 +1,32 @@
+{
+  "supplier": {
+    "name": "Example Supplier",
+    "platform": "Official",
+    "website": "https://example.com/",
+    "notes": "Example serial import"
+  },
+  "description": "Example Supplier import 2026-05-15",
+  "batches": [
+    {
+      "product": "Example Product",
+      "plan": "1y",
+      "card_type_name": "example-product-1y",
+      "card_type_alias": "Example Product 1 Year",
+      "create_card_type": true,
+      "unit_cost": 490,
+      "serials": [
+        "EXAMPLE-AAAA-BBBB-CCCC",
+        "EXAMPLE-DDDD-EEEE-FFFF"
+      ]
+    },
+    {
+      "product": "Example Product",
+      "plan": "lifetime",
+      "card_type_name": "example-product-lifetime",
+      "card_type_alias": "Example Product Lifetime",
+      "create_card_type": true,
+      "total_cost": 3000,
+      "serials": "EXAMPLE-GGGG-HHHH-IIII\nEXAMPLE-JJJJ-KKKK-LLLL"
+    }
+  ]
+}
