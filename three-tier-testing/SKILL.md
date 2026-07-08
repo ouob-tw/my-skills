@@ -1,26 +1,25 @@
 ---
 name: three-tier-testing
-description: Use when setting up test infrastructure, adding tests, reorganizing test directories, or reviewing test structure in Python (pytest) or TypeScript (Playwright/Vitest) projects. Triggers include creating test files, discussing test strategy, separating unit from integration tests, or when tests need external services like databases or Docker.
+description: Use when setting up test infrastructure, adding tests, reorganizing test directories, or reviewing test structure. Triggers include creating test files, discussing test strategy, separating unit from integration tests, or when tests need external services like databases or Docker.
 ---
 
 # 三層測試架構
 
 依照外部依賴程度，將測試分為三層。每層獨立運行，一條指令執行。
 
-| 層級     | 後端目錄（相對後端根） | 前端目錄（前後端分離時）        | 金鑰 | 目的                                      |
-| -------- | ---------------------- | ------------------------------- | ---- | ----------------------------------------- |
-| 單元測試 | `tests/unit/`          | `<frontend>/src/**/*.test.ts`   | 無   | 邏輯正確性 — 純程式碼，所有依賴皆 mock    |
-| 整合測試 | `tests/integration/`   | `<frontend>/tests/integration/` | 假的 | 服務串接 — 真實 DB／Playwright mock 後端   |
-| E2E 測試 | `tests/e2e/`           | `<frontend>/tests/e2e/`         | 真的 | 完整使用者流程 — 無 mock，真實外部服務     |
+| 層級 | 目錄 | 外部依賴 | 目的 |
+| ---- | ---- | -------- | ---- |
+| 單元測試 | `tests/unit/` | 無 | 邏輯正確性 — 純程式碼，所有依賴皆 mock |
+| 整合測試 | `tests/integration/` | 假的（測試用 DB 等） | 服務串接 — 真實 DB、mock 外部服務 |
+| E2E 測試 | `tests/e2e/` | 真的 | 完整使用者流程 — 無 mock，真實外部服務 |
 
-後端路徑皆**相對於後端根目錄**，「後端根」依架構而定：
+前後端分離時，後端測試放 `<backend>/tests/` 下，前端測試放 `<frontend>/tests/`（單元測試可能在 `<frontend>/src/**/*.test.*`）。單體專案直接用根目錄 `tests/`。
 
-- **單體專案（前後端未分離）：** 專案根目錄即後端根目錄，所有測試放根目錄 `tests/` 下（表格路徑即實際路徑）。
-- **前後端分離：** 後端是獨立子專案（自帶 `pyproject.toml`），後端測試放 `<backend>/tests/` 下、`pytest` 從 `<backend>/` 執行；前端測試放 `<frontend>/tests/` 下。表格的後端目錄需補上 `<backend>/` 前綴。
+## 裸跑原則
+
+裸跑測試指令（不帶目錄或標籤參數）只跑單元測試。整合與 E2E 需明確指定。具體實現方式（testpaths、build tag、設定檔分離等）依語言而定，見語言設定章節。
 
 ## 整合測試環境：Host（預設） vs Docker
-
-整合測試環境預設 Host（連本機開發 DB），符合以下條件時改用 Docker（`docker-compose.test.yml` 啟動獨立容器）：
 
 ```
 本機已跑單一 DB？          → Host（預設）
@@ -28,143 +27,67 @@ description: Use when setting up test infrastructure, adding tests, reorganizing
 多資料庫 / 訊息佇列？       → Docker
 ```
 
-## 規則：裸跑 `pytest` = 只跑單元測試
+## 測試範圍判斷
 
-裸跑 `pytest` 只跑單元測試（由 `testpaths` 控制）。整合與 E2E 需明確指定目錄。
+優先測試：
+- 業務關鍵路徑（付款、認證、資料寫入）
+- 錯誤處理與邊界條件
+- 安全邊界（權限檢查、輸入驗證）
+- 資料完整性（migration、約束、串接）
 
-## 設定（Python / pytest）
+不需測試：
+- trivial getter/setter、純資料結構
+- 框架自動生成的程式碼（ORM migration 檔、route 註冊）
+- 一次性腳本、設定檔
 
-### 1. 目錄結構
-
-以下相對於**後端根目錄**（單體專案為專案根，前後端分離為 `<backend>/`）：
-
-```
-tests/
-  unit/
-    __init__.py
-    conftest.py          ← 單元測試共用 fixture（無 DB）
-  integration/
-    __init__.py
-    conftest.py          ← DB engine、自動標記、環境載入
-  e2e/                   ← 可選；前後端分離時改放 <frontend>/tests/e2e/
-    conftest.py
-```
-
-### 2. pyproject.toml
-
-```toml
-[tool.pytest.ini_options]
-testpaths = ["tests/unit"]
-markers = [
-    "integration: requires services (DB, cache)",
-    "e2e: requires full stack with real external keys",
-]
-```
-
-### 3. 自動標記 conftest.py
-
-每一層的 `conftest.py` 自動套用對應標記，測試檔案不需要手動加 `@pytest.mark.integration`：
-
-```python
-# tests/integration/conftest.py
-import pytest
-
-def pytest_collection_modifyitems(items):
-    for item in items:
-        item.add_marker(pytest.mark.integration)
-```
-
-`tests/e2e/conftest.py` 同理，改用 `pytest.mark.e2e`。
-
-### 4. 整合測試環境
-
-**Host（預設）：** `.env.test` 指向本機開發 DB。整合測試的 conftest 用 `load_dotenv(".env.test", override=True)` 以 session scope autouse fixture 載入。
-
-**Docker：** 建立 `docker-compose.test.yml`，服務使用非預設 port（如 Postgres 用 5433）。整合測試的 conftest 以 session scope autouse fixture 啟動／關閉容器。
-
-### 5. 執行指令
-
-前後端分離時，後端指令請先 `cd <backend>` 再執行（`pyproject.toml` 在 `<backend>/`）：
-
-```bash
-# 只跑單元測試（預設）
-pytest
-
-# 只跑整合測試
-pytest tests/integration -m integration
-
-# 全部 Python 測試
-pytest tests/unit tests/integration
-
-# 前端整合測試
-bunx playwright test tests/integration
-
-# 前端 E2E
-bunx playwright test tests/e2e
-
-# E2E（Python）
-pytest tests/e2e -m e2e
-```
-
-## 設定（TypeScript / 前端）
-
-| 層級     | 工具       | 目錄                          |
-| -------- | ---------- | ----------------------------- |
-| 單元測試 | Vitest     | `src/**/*.test.ts`            |
-| 整合測試 | Playwright | `tests/integration/*.spec.ts` |
-| E2E      | Playwright | `tests/e2e/*.spec.ts`         |
-
-前後端分離時，以上路徑皆相對於 `<frontend>/`。整合與 E2E 皆可用 Playwright，差別在後端：mock backend → integration，真實 server → E2E。
+判斷不了時：問「這段壞了會不會有人被 page」。會 → 測。不會 → 跳過。
 
 ## 測試歸屬判斷
 
 ### 單元測試（`tests/unit/`）
 
-- 函式邏輯搭配 mock 依賴（`monkeypatch` / `MagicMock`）
+- 函式邏輯搭配 mock 依賴
 - 資料轉換、驗證、解析
 - 類別行為搭配假協作物件
 - 無 DB fixture、無外部服務
 
 ### 整合測試（`tests/integration/`）
 
-- 資料庫 migration（表結構、索引、約束）
-- Repository / Manager 的 CRUD（真實 SQL、`db_session`）
+- 資料庫操作（migration、CRUD、約束）
 - API endpoint 經由 test client 加真實 DB
-- Playwright + mock backend 的前端流程測試
+- 前端流程搭配 mock backend
 
-### E2E 測試（`tests/e2e/` 或 `<frontend>/tests/e2e/`）
+### E2E 測試（`tests/e2e/`）
 
-- 瀏覽器驅動的使用者流程（Playwright）— 無 mock，打真實 server
+- 瀏覽器驅動的使用者流程 — 無 mock，打真實 server
 - 完整 API 呼叫鏈搭配真實外部服務與真實 API 金鑰
 - 判斷標準：有 mock 就不是 E2E，歸 integration
 
 ## 從扁平 tests/ 遷移
 
-- [ ] 建立 `tests/unit/` 和 `tests/integration/`，各放 `__init__.py`
-- [ ] 逐一檢查測試檔：用到 DB fixture → `integration/`，純 mock → `unit/`
-- [ ] 拆分 `conftest.py`：DB fixture → `integration/conftest.py`，其餘 → `unit/conftest.py`
-- [ ] `pyproject.toml` 設定 `testpaths = ["tests/unit"]`
-- [ ] 每層加上自動標記 `conftest.py`
-- [ ] 執行驗證（見下方）
+- [ ] 建立 `tests/unit/` 和 `tests/integration/`
+- [ ] 逐一檢查測試檔：用到真實外部服務 → `integration/`，純 mock → `unit/`
+- [ ] 拆分共用 fixture：DB fixture → `integration/`，其餘 → `unit/`
+- [ ] 設定裸跑只執行單元測試（依語言設定）
+- [ ] 每層加上自動標記或標籤
+- [ ] 執行驗證：裸跑只收集單元測試、指定目錄只收集對應層級
 
-### 驗證迴圈
+## 語言設定
 
-遷移後反覆執行，直到兩者都正確：
+依專案檔偵測語言，讀取對應 reference：
 
-```bash
-# 必須只收集單元測試（無 DB fixture、無 integration 標記）
-pytest --collect-only
+| 偵測檔案 | 語言 | Reference |
+| -------- | ---- | --------- |
+| `pyproject.toml` 或 `setup.py` | Python | `references/python.md` |
+| `package.json` | TypeScript/JavaScript | `references/typescript.md` |
 
-# 必須只收集整合測試（全部標記為 integration）
-pytest tests/integration -m integration --collect-only
-```
+多語言專案：各語言子專案分別偵測，各讀各的 reference。
 
-不符合預期時檢查：檔案歸屬、`__init__.py`、自動標記 conftest。
+未列出的語言：依本文的通用原則（三層目錄、歸屬判斷、裸跑原則），具體設定由 agent 依該語言慣例自行決定。
 
 ## 注意事項
 
-- `testpaths = ["tests/unit"]` 是核心設定。若改成 `tests/` 或包含 `tests/integration`，裸跑 `pytest` 就會執行整合測試，破壞層級隔離。
-- 每個測試子目錄都需要 `__init__.py`，缺少的話 pytest 會靜默跳過該目錄。
-- 若測試 import 了真實 DB engine，即使放在 `tests/unit/` 也是整合測試。正確做法是搬移檔案，不是 mock import。
-- **Docker 模式：** 使用非預設 host port（如 `5433:5432`），避免與開發 DB 衝突。
-- **Host 模式：** 本機 DB 必須在測試前啟動。若測試出現連線錯誤，先檢查這點。可在整合測試 conftest 加連線檢查，提供清楚的錯誤訊息。
+- 裸跑只跑單元測試是核心設定。若設定錯誤導致裸跑執行整合測試，會破壞層級隔離。
+- 若測試 import 了真實外部服務，即使放在 `tests/unit/` 也是整合測試。正確做法是搬移檔案，不是 mock import。
+- Docker 模式使用非預設 port，避免與開發環境衝突。
+- Host 模式需確保外部服務在測試前已啟動。
