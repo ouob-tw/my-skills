@@ -58,6 +58,15 @@ def fitted_width(
     return min(max(raw_width, minimum), maximum), raw_width > maximum
 
 
+def recommended_zoom(font_size: float) -> int | None:
+    """Return the explicit table zoom for supported font sizes."""
+    if font_size == 10:
+        return 240
+    if font_size == 18:
+        return 115
+    return None
+
+
 def self_test() -> None:
     assert display_width("ABC") == 3
     assert display_width("中文") == 4
@@ -66,6 +75,9 @@ def self_test() -> None:
     assert fitted_width("日期", [date(2026, 8, 26)])[0] == 11
     assert fitted_width("備註", ["中" * 30]) == (40, True)
     assert fitted_width("說明", ["short\n較長內容"])[0] == 10
+    assert recommended_zoom(10) == 240
+    assert recommended_zoom(18) == 115
+    assert recommended_zoom(11) is None
 
 
 def main() -> None:
