@@ -118,8 +118,14 @@ DISPLAY=:1 agent-browser fill <password-ref> "$BANK_STATEMENT_PASSWORD"
 DISPLAY=:1 agent-browser fill <captcha-ref> "<captcha>"
 DISPLAY=:1 agent-browser click <confirm-ref>
 DISPLAY=:1 agent-browser wait --load networkidle
+DISPLAY=:1 agent-browser wait --fn \
+  "document.querySelector('iframe')?.contentDocument?.querySelector('#tab2 .table-scroll table') !== null"
 unset BANK_STATEMENT_PASSWORD
 ```
+
+登入頁本身也可能包含空 iframe，所以不得以「iframe 存在」判定登入成功。只有當
+iframe 內出現 `#tab2 .table-scroll table` 才能進入下載步驟；等待失敗時重新截圖並
+辨識新的驗證碼，不得保存空 iframe 或把驗證碼失敗當成成功。
 
 ---
 
