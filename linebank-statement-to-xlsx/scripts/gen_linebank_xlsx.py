@@ -31,6 +31,7 @@ EMPTY_CARD_HEADERS = [
     "換匯日",
     "支付帳戶帳號",
 ]
+FONT_SIZE = 18
 
 if len(sys.argv) not in (2, 3):
     print(f"Usage: {sys.argv[0]} <html_path> [output_dir]")
@@ -56,6 +57,7 @@ def dispw(s):
 
 def col_width(rows, idx):
     width = max((dispw(r[idx]) for r in rows if idx < len(r)), default=8) + 2
+    width *= FONT_SIZE / 11
     return min(max(width, 10), 40)
 
 def parse_amount(s):
@@ -179,23 +181,32 @@ card_net = sum(
 # ── 建立 Excel ───────────────────────────────────────────────────
 workbook = xlsxwriter.Workbook(str(OUT))
 
-num_fmt  = workbook.add_format({"num_format": "#,##0;[Red]-#,##0", "border": 1})
-cell_fmt = workbook.add_format({"border": 1, "text_wrap": True})
-date_fmt = workbook.add_format({"border": 1, "num_format": "yyyy-mm-dd"})
+num_fmt  = workbook.add_format({"font_size": FONT_SIZE, "num_format": "#,##0;[Red]-#,##0", "border": 1})
+cell_fmt = workbook.add_format({"font_size": FONT_SIZE, "border": 1, "text_wrap": True})
+date_fmt = workbook.add_format({"font_size": FONT_SIZE, "border": 1, "num_format": "yyyy-mm-dd"})
+table_header_fmt = workbook.add_format({
+    "bold": True,
+    "font_size": FONT_SIZE,
+    "font_color": "#FFFFFF",
+    "bg_color": "#4F81BD",
+    "border": 1,
+    "align": "center",
+    "valign": "vcenter",
+})
 
 # 統計頁專用格式
-title_fmt  = workbook.add_format({"bold": True, "bg_color": "#1F497D", "font_color": "#FFFFFF",
+title_fmt  = workbook.add_format({"bold": True, "font_size": FONT_SIZE, "bg_color": "#1F497D", "font_color": "#FFFFFF",
                                    "border": 1, "align": "center", "valign": "vcenter"})
-grp_fmt    = workbook.add_format({"bold": True, "bg_color": "#2E75B6", "font_color": "#FFFFFF", "border": 1})
-label_fmt  = workbook.add_format({"indent": 1, "border": 1})
-num_stat   = workbook.add_format({"num_format": "#,##0;[Red]-#,##0", "border": 1})
-total_fmt  = workbook.add_format({"bold": True, "bg_color": "#F4B942", "border": 1,
+grp_fmt    = workbook.add_format({"bold": True, "font_size": FONT_SIZE, "bg_color": "#2E75B6", "font_color": "#FFFFFF", "border": 1})
+label_fmt  = workbook.add_format({"font_size": FONT_SIZE, "indent": 1, "border": 1})
+num_stat   = workbook.add_format({"font_size": FONT_SIZE, "num_format": "#,##0;[Red]-#,##0", "border": 1})
+total_fmt  = workbook.add_format({"bold": True, "font_size": FONT_SIZE, "bg_color": "#F4B942", "border": 1,
                                    "num_format": "#,##0;[Red]-#,##0"})
-total_lbl  = workbook.add_format({"bold": True, "bg_color": "#F4B942", "border": 1})
+total_lbl  = workbook.add_format({"bold": True, "font_size": FONT_SIZE, "bg_color": "#F4B942", "border": 1})
 
 # ── 統計頁 ───────────────────────────────────────────────────────
 ws0 = workbook.add_worksheet("統計")
-ws0.set_zoom(100)
+ws0.set_zoom(115)
 ws0.set_column(0, 0, 24)
 ws0.set_column(1, 1, 10)
 ws0.set_column(2, 2, 16)
@@ -248,13 +259,13 @@ ws0.write(r, 2, card_net,         total_fmt)
 # ── 台幣存款記錄 ─────────────────────────────────────────────────
 ws1 = workbook.add_worksheet("台幣存款記錄")
 ws1.freeze_panes(1, 0)
-ws1.set_zoom(100)
+ws1.set_zoom(115)
 
 col_widths = [col_width([headers] + data_t2, i) for i in range(len(headers))]
 ws1.add_table(0, 0, len(data_t2), len(headers) - 1, {
     "style": "Table Style Medium 2",
     "total_row": False,
-    "columns": [{"header": h} for h in headers],
+    "columns": [{"header": h, "header_format": table_header_fmt} for h in headers],
 })
 for ci, w in enumerate(col_widths):
     ws1.set_column(ci, ci, w)
@@ -271,13 +282,13 @@ for ri, row in enumerate(data_t2, start=1):
 # ── 刷卡記錄 ─────────────────────────────────────────────────────
 ws2 = workbook.add_worksheet("刷卡記錄")
 ws2.freeze_panes(1, 0)
-ws2.set_zoom(100)
+ws2.set_zoom(115)
 
 col_widths4 = [col_width([headers4] + data_t4, i) for i in range(len(headers4))]
 ws2.add_table(0, 0, max(len(data_t4), 1), len(headers4) - 1, {
     "style": "Table Style Medium 2",
     "total_row": False,
-    "columns": [{"header": h} for h in headers4],
+    "columns": [{"header": h, "header_format": table_header_fmt} for h in headers4],
 })
 for ci, w in enumerate(col_widths4):
     ws2.set_column(ci, ci, w)

@@ -76,10 +76,16 @@ def test_statistics_title_uses_statement_period(tmp_path):
     assert workbook["刷卡記錄"]["F2"].number_format == "yyyy-mm-dd"
     for sheet_name in ("統計", "台幣存款記錄", "刷卡記錄"):
         sheet = workbook[sheet_name]
-        assert sheet.sheet_view.zoomScale in (None, 100)
+        assert sheet.sheet_view.zoomScale == 115
         assert all(
             10 <= sheet.column_dimensions[get_column_letter(column)].width <= 41
             for column in range(1, sheet.max_column + 1)
+        )
+        assert all(
+            cell.font.size == 18
+            for row in sheet.iter_rows()
+            for cell in row
+            if cell.value is not None
         )
 
 

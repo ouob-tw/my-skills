@@ -134,7 +134,9 @@ iframe 內出現 `#tab2 .table-scroll table` 才能進入下載步驟；等待�
 對帳單在 `<iframe>` 內，JSON 資料需認證 cookie，**不可直接開 iframe URL**。
 
 ```bash
-cat <<'EOF' | DISPLAY=:1 agent-browser eval --stdin > linebank_YYYY_MM.html
+cat <<'EOF' | DISPLAY=:1 agent-browser eval --stdin \
+  | uv run python -c 'import json,sys; sys.stdout.write(json.load(sys.stdin))' \
+  > private/banks/linebank/raw/YYYY/YYYY-MM.html
 (function(){
   const doc = document.querySelector('iframe').contentDocument;
   let css = '';
@@ -147,23 +149,47 @@ cat <<'EOF' | DISPLAY=:1 agent-browser eval --stdin > linebank_YYYY_MM.html
 EOF
 ```
 
-**eval 輸出為 JSON 字串**，須以 JSON parser 解碼後再覆寫成 HTML；不可把帶引號
-與 escape sequences 的原始 eval 輸出直接交給產生器。
+**eval 輸出為 JSON 字串**；上述管線會先以 JSON parser 解碼，再把純 HTML 寫入
+raw。不可省略解碼步驟，或把帶引號與 escape sequences 的原始 eval 輸出直接交給
+產生器。
 
 ---
 
 ## Step 4：產生 Excel
 
+產生或整改 Excel 時同時使用 `excel-table-style` Skill，依其共用契約計算每張工作表
+的欄寬與 Zoom；本 Skill 只保留 LINE Bank 來源及欄位特有規則。
+所有輸出工作表（包含統計頁）的基礎字體固定為 `18pt`、Zoom 固定為 `115%`；
+粗體、字色與底色維持欄位契約，欄寬按 `18 / 11` 縮放後仍限制在 10–40。
+
 ```bash
 uv run --with xlsxwriter --with beautifulsoup4 \
-  scripts/gen_linebank_xlsx.py linebank_YYYY_MM.html
+  skills/linebank-statement-to-xlsx/scripts/gen_linebank_xlsx.py \
+  private/banks/linebank/raw/YYYY/YYYY-MM.html \
+  private/banks/linebank/output/YYYY
 ```
 
-輸出 `linebank_YYYY_MM.xlsx` 與 HTML 同目錄。
+原始 HTML 內容不改寫，按 `YYYY-MM.html` 留在 `private/banks/linebank/raw/YYYY/`；
+Excel 以 `YYYY-MM_交易明細.xlsx` 輸出到 `private/banks/linebank/output/YYYY/`。資料已
+由資料夾表示銀行，不在檔名加銀行前綴；兩者都不得提交 Git。
+
+輸出欄位契約：
+
+- `台幣存款記錄` 的銀行交易日期命名為 `入帳日`。
+- `刷卡記錄` 固定分成 `消費日` 與 `入帳日` 兩欄。
+- billViewer 只提供單一刷卡日期時，保存為 `消費日` 並讓 `入帳日` 留空；不複製或
+  推定第二個日期。
+- 舊 HTML 將兩日放在同一格時，依來源中的分隔符拆開後再輸出。
+- 若來源提供 `外幣消費金額/換匯日`，輸出時拆成 `外幣消費金額` 與 `換匯日`。
+- 所有已知日期以 Excel 日期值保存並顯示為 `yyyy-mm-dd`；空白日期維持空白。
 
 **內建驗證（自動）：**
 - tab2 末列餘額 == 頁面「台幣存款總餘額」
 - tab4 淨加總 == 頁面「刷卡消費總金額」（含退貨負數）
+
+若需重建仍保存為 `MM_files/saved_resource.html` 的 2025 舊格式年度彙整，才執行
+`uv run skills/linebank-statement-to-xlsx/scripts/convert_legacy_2025.py`；legacy 輸出也遵守
+相同日期欄位契約。一般月份不得使用此 legacy 入口。
 
 ---
 
