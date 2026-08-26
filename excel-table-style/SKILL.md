@@ -1,30 +1,64 @@
 ---
 name: excel-table-style
-description: Use when 產生XLSX表格
+description: Use whenever creating, regenerating, or restyling XLSX tables with openpyxl or XlsxWriter, especially for column widths, CJK text, dates, wrapping, filters, freeze panes, zoom, and post-write workbook validation.
+compatibility: Requires Python 3.10+; workbook operations may use openpyxl or XlsxWriter.
 ---
 
+# Excel 表格樣式
 
-## 一、套件選用
+建立或整改 XLSX 時，讓資料型別、欄寬與檢視設定一致且可驗證。既有專案契約優先；
+本 Skill 提供沒有更具體規範時的預設值。
 
-| 階段 | 套件 | 理由 |
-|---|---|---|
-| 反覆調整、要自動驗證數字 | **openpyxl** | 不寫公式快取，可被 LibreOffice headless 重算驗證 |
-| 定版、要格式化表格 | **xlsxwriter** | 表格(ListObject)最穩、樣式內建；缺點是公式值為快取，非 Excel 工具不重算 |
+## 執行流程
 
-## 二、欄寬
+1. 先盤點工作表、表頭、資料型別、公式、既有 Table/AutoFilter、凍結窗格與下游讀取契約。
+2. 保留既有函式庫；編輯既有活頁簿通常用 `openpyxl`，從零建立且需要 Excel Table 時通常用 `XlsxWriter`。不要只為樣式切換函式庫。
+3. 先寫入最終值與 `number_format`，再逐張工作表計算欄寬。插入、刪除或拆分欄位後重新計算全部已使用欄位，不沿用舊欄寬。
+4. 套用表頭、數字格式、篩選、凍結窗格、換行與縮放。只有契約要求 Excel Table（ListObject）時才建立；既有契約若只允許 AutoFilter 就維持原狀。
+5. 儲存後重新開啟活頁簿，逐張驗證表頭、資料型別、公式、日期格式、欄寬、工作表數量與既有結構。
 
-- **程式計算、不寫死**。中文字寬 2、半形 1，取「右邊有數值的列」中最長標籤 + 2 邊距：
+完成條件：所有已使用欄位符合下列欄寬契約，長文字可讀，日期與數字仍是 Excel 原生值，且重新開啟後結構與資料筆數不變。
 
-```python
-def dispw(s): return sum(2 if ord(ch)>0x2E7F else 1 for ch in s)
-a_width = max(dispw(s) for s in a_labels) + 2
+## 欄寬契約
+
+- 依儲存格的「顯示內容」計算，不使用 Python 物件的 `str()` 表示。日期顯示為 `yyyy-mm-dd` 時按 10 個半形字元計算，不按 `2026-01-01 00:00:00` 計算。
+- 每個半形字元算 1 單位；Unicode East Asian Width 為 `W` 或 `F` 的 CJK／全形字元算 2 單位；多行文字取最長一行。
+- 表頭加 2 單位，資料加 1 單位，取該欄最大值。
+- 預設最小欄寬 10、最大欄寬 40。專案可為識別碼、備註等欄位設定具理由的局部 override。
+- 計算值超過最大欄寬時，欄寬設為最大值並開啟 `wrap_text`；不要讓單一長文字把整張表拉寬。
+- 逐張工作表獨立計算；資料列多寡本身不影響欄寬，內容的最長顯示值才影響。
+- 若字體顯著大於 Excel 預設 11pt，可按 `font_size / 11` 縮放內容寬度，但仍受最大欄寬限制。
+
+使用 [`scripts/column_width.py`](scripts/column_width.py) 的 `display_width()` 與
+`fitted_width()` 作為確定性的共用算法；它不讀寫工作簿，可由 `openpyxl` 與
+`XlsxWriter` 呼叫。
+
+## 表格契約
+
+- 第一列使用明確且唯一的表頭；凍結資料表的表頭列。
+- 日期、時間與數字保存為 Excel 原生型別，缺值維持空白。顯示格式不應把文字偽裝成日期或數字。
+- 金額欄靠右並使用一致的千分位／負數格式；文字欄依內容決定是否換行。
+- 篩選範圍精確涵蓋表頭與資料。是否建立 Excel Table 由既有專案契約決定，不以樣式需求擅自改變結構。
+- 保留既有工作表順序、名稱、公式、合併儲存格、命名範圍及下游依賴，除非任務明確要求修改。
+
+## 檢視設定
+
+- 縮放只影響螢幕檢視，不影響欄寬或列印比例。
+- 整改既有活頁簿時保留原縮放；新活頁簿預設 100%。只有使用者或專案契約指定時才使用 240% 等特殊值。
+- 對所有資料工作表套用規則，不假設固定工作表數量。
+
+## 驗證
+
+先執行共用算法的自我測試：
+
+```bash
+uv run excel-table-style/scripts/column_width.py --self-test
 ```
 
-## 三、預設縮放
+再重新開啟實際輸出並檢查：
 
-- 三頁都 `set_zoom(240)`，開檔即 **240%**
-- 範圍 10–400；每頁可各自設；只影響螢幕檢視，不影響列印（列印是 `set_print_scale()`）
-
-```python
-for _ws in (s,c,p): _ws.set_zoom(240)
-```
+- 每個已使用欄位的寬度都在允許範圍內。
+- 日期儲存格是日期值且顯示格式正確。
+- 超長文字欄已達最大寬度並啟用換行。
+- 拆欄或插欄後，欄寬對應目前欄位而非舊欄位位置。
+- 表頭、資料列數、公式與既有 Table/AutoFilter 契約未改變。
