@@ -18,14 +18,14 @@ Zoho Mail（預設）或 .eml（備援）→ 當月 billViewer URL
 - 解析與輸出：`uv`、`beautifulsoup4`、`xlsxwriter`。
 - 帳單登入：`agent-browser`。有頭模式需要 display（通常為 `DISPLAY=:1`）；
   無螢幕環境在 `agent-browser.json` 設定 `headed=false`。
-- 憑證：專案根目錄 `.env` 的 `LINEBANK_STATEMENT_PASSWORD`。
+- 憑證：專案根目錄 `.env` 的 `BANK_STATEMENT_PASSWORD`。
 
 ---
 
 ## Step 0：登入憑證預檢
 
 當任務需要開啟帳單內容或產生 Excel 時，在流程一開始只讀取專案根目錄
-`.env` 的 `LINEBANK_STATEMENT_PASSWORD`。不要顯示 `.env` 全文或將值寫入輸出、
+`.env` 的 `BANK_STATEMENT_PASSWORD`。不要顯示 `.env` 全文或將值寫入輸出、
 指令紀錄、截圖、Git、報告。將值載入暫時的程序環境，供登入步驟使用。
 
 若變數不存在或空白，立即詢問使用者提供 LINE Bank 對帳單的身分證字號／檔案
@@ -114,11 +114,11 @@ DISPLAY=:1 agent-browser screenshot /tmp/check.png   # 目視確認驗證碼文�
 前次執行的 refs。
 
 ```bash
-DISPLAY=:1 agent-browser fill <password-ref> "$LINEBANK_STATEMENT_PASSWORD"
+DISPLAY=:1 agent-browser fill <password-ref> "$BANK_STATEMENT_PASSWORD"
 DISPLAY=:1 agent-browser fill <captcha-ref> "<captcha>"
 DISPLAY=:1 agent-browser click <confirm-ref>
 DISPLAY=:1 agent-browser wait --load networkidle
-unset LINEBANK_STATEMENT_PASSWORD
+unset BANK_STATEMENT_PASSWORD
 ```
 
 ---
