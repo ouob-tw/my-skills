@@ -73,6 +73,7 @@ def self_test() -> None:
     assert display_width(date(2026, 8, 26), "yyyy-mm-dd") == 10
     assert display_width(12345, "#,##0") == 6
     assert fitted_width("日期", [date(2026, 8, 26)])[0] == 11
+    assert fitted_width("日期", [date(2026, 8, 26)], font_size=18)[0] == 18
     assert fitted_width("備註", ["中" * 30]) == (40, True)
     assert fitted_width("說明", ["short\n較長內容"])[0] == 10
     assert recommended_zoom(10) == 240
