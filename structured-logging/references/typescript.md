@@ -34,10 +34,16 @@ export function logLine(level: LogLevel, logger: string, message: string, extra:
 function safeValue(this: Record<string, unknown>, key: string, value: unknown): unknown {
 	const raw = this[key];
 	if (raw instanceof Uint8Array || raw instanceof ArrayBuffer) return `<bytes:${raw.byteLength}>`;
-	if (typeof raw === 'bigint') return raw.toString();
-	if (raw instanceof Error) return `${raw.name}: ${raw.message}`.slice(0, MAX_VALUE);
+	if (typeof raw === 'bigint') return cut(raw.toString());
+	if (raw instanceof Error) return cut(`${raw.name}: ${raw.message}`);
+	// Class instances (after any toJSON) are not data you chose to log: keep a short string.
+	if (value !== null && typeof value === 'object' && !Array.isArray(value) && ![Object.prototype, null].includes(Object.getPrototypeOf(value))) {
+		return cut(String(value));
+	}
 	return value;
 }
+
+const cut = (text: string) => (text.length > MAX_VALUE ? `${text.slice(0, MAX_VALUE)}…` : text);
 
 export function log(level: LogLevel, logger: string, message: string, extra?: Record<string, unknown>): void {
 	process.stderr.write(logLine(level, logger, message, extra) + '\n');
@@ -67,12 +73,16 @@ function variants(value: string): string[] {
 	return [value, value.trim(), normalised, normalised.trim(), JSON.stringify(value).slice(1, -1), ...lines];
 }
 
-/** A request body's top-level fields: URL-encoded or multipart forms, and JSON whatever the
- *  declared content type; null for anything else. Pass a copy (`request.clone()`). */
+/** A request body's top-level fields: URL-encoded or multipart forms (every value of a repeated
+ *  field), and JSON whatever the declared content type; null for anything else. Pass a copy
+ *  (`request.clone()`). */
 export async function bodyFields(copy: Request): Promise<Record<string, unknown> | null> {
 	const type = copy.headers.get('content-type') ?? '';
 	try {
-		if (/application\/x-www-form-urlencoded|multipart\/form-data/.test(type)) return Object.fromEntries((await copy.formData()).entries());
+		if (/application\/x-www-form-urlencoded|multipart\/form-data/.test(type)) {
+			const form = await copy.formData();
+			return Object.fromEntries([...new Set(form.keys())].map((key) => [key, form.getAll(key)]));
+		}
 		const parsed: unknown = JSON.parse(await copy.text());
 		return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
 	} catch {
@@ -82,7 +92,8 @@ export async function bodyFields(copy: Request): Promise<Record<string, unknown>
 
 /** The texts to take out for one request: its content fields and its token. */
 export function secretsOf(fields: Record<string, unknown> | null, token: string | undefined, contentFields: readonly string[]): string[] {
-	const values = contentFields.map((field) => fields?.[field]).filter((value): value is string => typeof value === 'string');
+	// A field may hold several values: a repeated form field or a JSON array.
+	const values = contentFields.flatMap((field) => [fields?.[field]].flat()).filter((value): value is string => typeof value === 'string');
 	if (token) values.push(token);
 	const found = new Set(values.flatMap(variants).filter((value) => value.trim()));
 	// Longest first, so a value inside a longer one does not leave the rest of it behind.
