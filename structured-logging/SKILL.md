@@ -1,263 +1,72 @@
 ---
 name: structured-logging
-description: Use when setting up logging for a new Python/FastAPI project, adding structured logging to an existing project, creating a logging module, or configuring JSON log output. Triggers include new projects needing observability, questions about log format standards, request tracing with request_id, or adding log context propagation.
+description: Use when adding or reviewing logging in a service (Python/FastAPI, Node/TypeScript, SvelteKit or similar): JSON log lines, the fixed log fields, request_id tracing, logging exceptions and 5xx responses, or keeping passwords, tokens and user content out of logs.
 ---
 
 # Structured Logging Standard
 
-## Overview
+Every service writes logs the same way, whatever its language, so one query works across all of them. This file holds the rules; the code lives in one reference per language.
 
-Stdlib-only structured JSON logging for Python services. Each log line is a self-contained JSON object with fixed fields, contextvar-based request tracing, and a single `setup_logging()` entry point.
+## Pick your language
 
-## When to Use
+- Python / FastAPI: read [references/python.md](references/python.md).
+- Node / TypeScript (any HTTP framework; SvelteKit example included): read [references/typescript.md](references/typescript.md).
+- Anything else: implement the rules below, using the closer of the two references as the template.
 
-- Setting up logging for a new Python/FastAPI service
-- Adding request_id tracing across async handlers
-- Replacing unstructured `print()` or basic `logging.info()` with queryable JSON
-- Standardizing log format across multiple services
+## Rules
 
-## Quick Reference
+### One JSON object per line
 
-### Fixed Fields
+Each event is one compact JSON object on one line. Non-ASCII text stays as written (Python: `ensure_ascii=False`; `JSON.stringify` already does). Values that are not JSON (bytes, dates, objects) are turned into short strings, never dumped whole.
 
-| Field | Source | Notes |
-|-------|--------|-------|
-| `ts` | UTC ISO 8601, ms precision | `2026-05-24T08:30:12.345+00:00` |
-| `level` | INFO / WARNING / ERROR / DEBUG | |
-| `logger` | `__name__` | |
-| `layer` | `setup_logging(layer=...)` | Multi-service: distinguish origin. Single-service: use default `"app"` |
-| `message` | `logger.info("event_name")` | Event identifier |
+### Fixed fields
 
-Protection: context or extra with same key name will NOT overwrite fixed fields.
+| Field | Value |
+|-------|-------|
+| `ts` | Event time, UTC, ISO 8601 with milliseconds (`2026-05-24T08:30:12.345+00:00` or `…Z`) |
+| `level` | `DEBUG`, `INFO`, `WARNING` or `ERROR` |
+| `logger` | Module or component name (`__name__`, `app.http`) |
+| `layer` | Service name, set once at start-up; `"app"` when there is only one service |
+| `message` | Event name in snake_case (`http_error`, `stage_complete`), never a sentence or interpolated data |
 
-### Context API
+Event details go in extra fields beside them (`method`, `path`, `status`, `duration_ms`). No extra field and no context value may overwrite a fixed field or `request_id`: the logger drops the colliding key, so a field named `message` is renamed by the caller (for example to `detail`).
 
-| Function | Purpose |
-|----------|---------|
-| `set_context(**kwargs)` | Merge non-None values, return token |
-| `get_context()` | Return context copy |
-| `clear_context(token)` | Reset via token, or pass None to clear all |
+### request_id
 
-### Settings
+- Every request gets one id: the incoming `x-request-id` header when it is a short plain token (letters, digits, `.`, `:`, `_`, `-`, at most 128 characters), otherwise a new UUID.
+- The id is held in request-scoped context (Python `contextvars`, Node `AsyncLocalStorage`) so every line logged while handling the request carries `request_id`, however deep the call. Context is cleared or scoped so it never leaks into the next request.
+- Error hooks that a framework calls outside that scope keep the id on the request object and re-enter the context with it.
 
-```python
-class Settings(BaseSettings):
-    log_level: str = "INFO"
-    log_dir: str = ""  # empty = stdout only
-```
+### Exceptions
 
-### Initialization
+An exception is logged once, where it is handled, with `exc_type` (class name), `exc_message` and `traceback` (full stack). An unhandled exception in a request also gets `method`, `path` and the `500` status it causes, on the same line or a separate `ERROR` line.
 
-```python
-from myproject.logging import setup_logging
+### What to log
 
-setup_logging(
-    layer="my-service",
-    level=settings.log_level,
-    log_dir=settings.log_dir or None,  # None = stdout only; path = stdout + daily rotation
-)
-```
+- Every response with status 500 or above: one `ERROR` line with `method`, `path`, `status` and the failure reason the response carried.
+- Expected refusals (4xx) are not errors; log them at `INFO` or not at all.
+- A per-request access line (`INFO`, with `duration_ms`) is optional per project.
 
-## Implementation
+### Never log secrets or user content
 
-### Core Module (logging.py)
+Passwords, tokens, cookies, `Authorization` headers and user content (message bodies, form answers, uploaded files) never reach a log line. Log metadata about them instead (length, count, id).
 
-```python
-from __future__ import annotations
+Text a line copies from somewhere else (a response's reason, an exception message or stack, a library error) can still carry them, so it passes a **redactor** first:
 
-import contextvars
-import json
-import logging
-import sys
-import time
-from datetime import datetime, timezone
-from logging.handlers import TimedRotatingFileHandler
-from pathlib import Path
-from typing import Any
+1. Collect the request's secrets: the token from its cookie or header and the values of its content fields, each also trimmed, with line breaks normalised, JSON-escaped, and line by line. Read the body from a copy, whatever its content type.
+2. Replace every occurrence with `[omitted]`, longest first.
+3. Also replace what libraries quote back: input a JSON parser could not read, an argument a child process refused, and the query and fragment of every URL.
+4. Cut the text to its length limit only after redacting: a secret split by the cut is no longer recognised.
 
-_context: contextvars.ContextVar[dict[str, Any]] = contextvars.ContextVar(
-    "app_logging_context", default={}
-)
+Anything a client sends to be logged (browser error reports) is untrusted: log only what the server can validate (an error type from a fixed list, a canonical message for a recognised template, script locations that exist in the build, a known page path) and `[omitted]` for the rest.
 
-_RESERVED_RECORD_KEYS = frozenset(
-    logging.LogRecord("", 0, "", 0, "", (), None).__dict__
-) | {"message", "asctime"}
-_FIXED_FIELDS = frozenset({"ts", "level", "logger", "layer", "message"})
-_STRUCTURED_HANDLER_ATTR = "_structured"
+### Where output goes
 
+Write to stdout or stderr and let the platform collect it (systemd journal, container runtime). A daily rotating file is optional, for hosts without a collector; the Python reference has one.
 
-class JsonFormatter(logging.Formatter):
-    def __init__(self, layer: str) -> None:
-        super().__init__()
-        self.layer = layer
+## Gotchas
 
-    def format(self, record: logging.LogRecord) -> str:
-        data: dict[str, Any] = {
-            "ts": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
-            "level": record.levelname,
-            "logger": record.name,
-            "layer": self.layer,
-            "message": record.getMessage(),
-        }
-        data.update({k: v for k, v in get_context().items() if k not in _FIXED_FIELDS})
-        data.update(_record_extras(record))
-        if record.exc_info:
-            data.setdefault("exc_type", record.exc_info[0].__name__)
-            data.setdefault("exc_message", str(record.exc_info[1]))
-            data.setdefault("traceback", self.formatException(record.exc_info))
-        return json.dumps(data, ensure_ascii=False, separators=(",", ":"), default=_json_default)
-
-
-def set_context(**kwargs: Any) -> contextvars.Token:
-    current = get_context()
-    current.update({k: v for k, v in kwargs.items() if v is not None})
-    return _context.set(current)
-
-
-def get_context() -> dict[str, Any]:
-    return dict(_context.get())
-
-
-def clear_context(token: contextvars.Token | None = None) -> None:
-    if token is not None:
-        _context.reset(token)
-        return
-    _context.set({})
-
-
-def setup_logging(layer: str = "app", level: str = "INFO", log_dir: str | None = None) -> None:
-    numeric_level = logging.getLevelName(level.upper())
-    if not isinstance(numeric_level, int):
-        numeric_level = logging.INFO
-    root_logger = logging.getLogger()
-    _remove_structured_handlers(root_logger)
-    for handler in _structured_handlers(layer, log_dir):
-        root_logger.addHandler(handler)
-    root_logger.setLevel(numeric_level)
-
-
-def _record_extras(record: logging.LogRecord) -> dict[str, Any]:
-    return {
-        k: v for k, v in record.__dict__.items()
-        if k not in _RESERVED_RECORD_KEYS and k not in _FIXED_FIELDS and not k.startswith("_")
-    }
-
-
-def _json_default(value: Any) -> str:
-    if isinstance(value, bytes | bytearray):
-        return f"<bytes:{len(value)}>"
-    return str(value)
-
-
-def _mark_structured(handler: logging.Handler, formatter: logging.Formatter) -> logging.Handler:
-    handler.setFormatter(formatter)
-    setattr(handler, _STRUCTURED_HANDLER_ATTR, True)
-    return handler
-
-
-def _structured_handlers(layer: str, log_dir: str | None) -> list[logging.Handler]:
-    formatter = JsonFormatter(layer=layer)
-    handlers: list[logging.Handler] = [_mark_structured(logging.StreamHandler(sys.stdout), formatter)]
-    if log_dir is None:
-        return handlers
-    log_path = Path(log_dir)
-    log_path.mkdir(parents=True, exist_ok=True)
-    file_handler = TimedRotatingFileHandler(
-        log_path / f"{layer}.log", when="midnight", backupCount=180, encoding="utf-8",
-    )
-    handlers.append(_mark_structured(file_handler, formatter))
-    return handlers
-
-
-def _remove_structured_handlers(logger: logging.Logger) -> None:
-    for handler in list(logger.handlers):
-        if getattr(handler, _STRUCTURED_HANDLER_ATTR, False):
-            logger.removeHandler(handler)
-            handler.close()
-```
-
-### HTTP Middleware
-
-```python
-import logging
-import time
-import uuid
-
-from fastapi import Request
-from starlette.middleware.base import BaseHTTPMiddleware
-
-from .logging import clear_context, set_context
-
-logger = logging.getLogger(__name__)
-
-
-class RequestLoggingMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
-        request.state.request_id = request_id
-        token = set_context(request_id=request_id)
-        start = time.monotonic()
-        status_code = None
-        try:
-            response = await call_next(request)
-            status_code = response.status_code
-            response.headers["X-Request-Id"] = request_id
-            return response
-        finally:
-            duration_ms = int((time.monotonic() - start) * 1000)
-            extra = {
-                "method": request.method,
-                "path": request.url.path,
-                "status_code": status_code,
-                "duration_ms": duration_ms,
-                "client_host": request.client.host if request.client else None,
-            }
-            if status_code is not None:
-                logger.info("http_request", extra=extra)
-            else:
-                logger.error("http_request_failed", extra=extra, exc_info=True)
-            clear_context(token)
-```
-
-## Optional Extensions
-
-| Feature | When to add | Implementation |
-|---------|-------------|----------------|
-| **StageTimer** | Need latency tracking for specific code blocks | Context manager logging `stage_complete` / `stage_failed` with `duration_ms` |
-| **GPU Stats** | CUDA/ML inference projects | Helper returning `mem_used_mb`, `mem_reserved_mb`, `mem_total_mb` |
-| **run_in_executor_with_context** | async + blocking thread pool needing context propagation | `contextvars.copy_context().run(func, *args)` inside executor |
-
-### StageTimer (if needed)
-
-```python
-class StageTimer:
-    def __init__(self, stage_name: str, logger: logging.Logger | None = None) -> None:
-        self.stage_name = stage_name
-        self.logger = logger or logging.getLogger(__name__)
-        self.duration_ms: int | None = None
-        self._started_at: float = 0.0
-
-    def __enter__(self) -> StageTimer:
-        self._started_at = time.perf_counter()
-        return self
-
-    def __exit__(self, exc_type, exc, tb) -> bool:
-        self.duration_ms = int((time.perf_counter() - self._started_at) * 1000)
-        extra: dict[str, Any] = {"stage": self.stage_name, "duration_ms": self.duration_ms}
-        if exc_type is None:
-            self.logger.info("stage_complete", extra=extra)
-            return False
-        extra.update({"error": exc_type.__name__, "error_message": str(exc)})
-        self.logger.error("stage_failed", extra=extra, exc_info=(exc_type, exc, tb))
-        return False
-```
-
-## Common Mistakes
-
-| Mistake | Fix |
-|---------|-----|
-| Calling `setup_logging()` multiple times | It's idempotent (removes old handlers first), but call once at entry point |
-| Forgetting `clear_context()` in finally | Leaks context to unrelated requests |
-| Passing `bytes` in extra fields | `_json_default` handles it, but prefer logging length/metadata instead |
-| Using `print()` instead of `logger` | Won't go through JsonFormatter — use `logging.getLogger(__name__)` |
-| Setting context in middleware but not clearing on exception | Always use `try/finally` with `clear_context(token)` |
+- Truncating before redacting leaks most of a token placed across the limit.
+- Error messages from runtimes quote their input: Node's `Received '…'` for bad arguments and `JSON.parse`'s `"…" is not valid JSON` preview (cut short with `...` when long) repeat user text or file content verbatim.
+- A framework can fail before the request middleware runs (route module loading): the error hook then has no request id and no response line unless it creates both itself.
+- Exact-value redaction cannot recognise a reason that quotes only a few words of the user's text; keep user text out of error reasons at the source.
