@@ -114,10 +114,15 @@ def _record_extras(record: logging.LogRecord) -> dict[str, Any]:
     }
 
 
+_MAX_VALUE = 300
+
+
 def _json_default(value: Any) -> str:
     if isinstance(value, bytes | bytearray):
         return f"<bytes:{len(value)}>"
-    return str(value)
+    text = str(value)
+    return text if len(text) <= _MAX_VALUE else text[:_MAX_VALUE] + "…"
+
 
 
 def _mark_structured(handler: logging.Handler, formatter: logging.Formatter) -> logging.Handler:
@@ -182,12 +187,12 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             extra = {
                 "method": request.method,
                 "path": request.url.path,
-                "status_code": status_code,
+                "status": status_code,
                 "duration_ms": duration_ms,
                 "client_host": request.client.host if request.client else None,
             }
             if status_code is None:  # the exception becomes a 500 response
-                logger.error("http_request_failed", extra={**extra, "status_code": 500}, exc_info=True)
+                logger.error("http_request_failed", extra={**extra, "status": 500}, exc_info=True)
             elif status_code >= 500:
                 logger.error("http_request", extra=extra)
             else:
@@ -238,6 +243,8 @@ class StageTimer:
 | Using `print()` instead of `logger` | Won't go through JsonFormatter — use `logging.getLogger(__name__)` |
 | Setting context in middleware but not clearing on exception | Always use `try/finally` with `clear_context(token)` |
 
-## Redaction
+## Not built in
 
-Not built in. When a line copies text from an exception or a response reason, pass it through a redactor that follows the steps in SKILL.md before logging it.
+- **Failure reasons of 5xx responses.** The middleware logs a returned 5xx at `ERROR` with `status` but does not read the response body. To add the reason, read the JSON body of a 5xx response and rebuild the response from the bytes read, and add redaction with it.
+- **Redaction.** Any line that copies text from an exception, a response reason or a library error passes it through a redactor that follows the steps in SKILL.md first.
+- **Browser error reports.** When you add an endpoint for them, follow the client-report rule in SKILL.md: log only what the server can validate, never the report's free text.

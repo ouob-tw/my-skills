@@ -1,6 +1,6 @@
 ---
 name: structured-logging
-description: Use when adding or reviewing logging in a service (Python/FastAPI, Node/TypeScript, SvelteKit or similar): JSON log lines, the fixed log fields, request_id tracing, logging exceptions and 5xx responses, or keeping passwords, tokens and user content out of logs.
+description: "Use when adding or reviewing logging in a service (Python/FastAPI, Node/TypeScript, SvelteKit or similar) — JSON log lines, the fixed log fields, request_id tracing, logging exceptions and 5xx responses, or keeping passwords, tokens and user content out of logs."
 ---
 
 # Structured Logging Standard
@@ -17,7 +17,7 @@ Every service writes logs the same way, whatever its language, so one query work
 
 ### One JSON object per line
 
-Each event is one compact JSON object on one line. Non-ASCII text stays as written (Python: `ensure_ascii=False`; `JSON.stringify` already does). Values that are not JSON (bytes, dates, objects) are turned into short strings, never dumped whole.
+Each event is one compact JSON object on one line. Non-ASCII text stays as written (Python: `ensure_ascii=False`; `JSON.stringify` already does). Values that are not JSON (bytes, big integers, custom objects) become a short marker (`<bytes:42>`) or a string cut to a few hundred characters, never dumped whole.
 
 ### Fixed fields
 
@@ -53,7 +53,7 @@ Passwords, tokens, cookies, `Authorization` headers and user content (message bo
 
 Text a line copies from somewhere else (a response's reason, an exception message or stack, a library error) can still carry them, so it passes a **redactor** first:
 
-1. Collect the request's secrets: the token from its cookie or header and the values of its content fields, each also trimmed, with line breaks normalised, JSON-escaped, and line by line. Read the body from a copy, whatever its content type.
+1. Collect the request's secrets: the token from its cookie or header and the values of its content fields, each also trimmed, with line breaks normalised, JSON-escaped, and each line of four or more characters (shorter lines are too common to take out). Read the body from a copy: JSON whatever its declared content type, and URL-encoded or multipart forms.
 2. Replace every occurrence with `[omitted]`, longest first.
 3. Also replace what libraries quote back: input a JSON parser could not read, an argument a child process refused, and the query and fragment of every URL.
 4. Cut the text to its length limit only after redacting: a secret split by the cut is no longer recognised.

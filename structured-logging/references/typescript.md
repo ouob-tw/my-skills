@@ -14,6 +14,7 @@ let layer = 'app';
 export const setLayer = (name: string) => void (layer = name);
 
 const FIXED = new Set(['ts', 'level', 'logger', 'layer', 'message', 'request_id']);
+const MAX_VALUE = 300;
 const context = new AsyncLocalStorage<{ requestId: string }>();
 
 /** Run `action` with this request id on every line it logs, however deep the call. */
@@ -26,14 +27,23 @@ export function logLine(level: LogLevel, logger: string, message: string, extra:
 	for (const [key, value] of Object.entries(extra)) {
 		if (!FIXED.has(key) && value !== undefined) record[key] = value;
 	}
-	return JSON.stringify(record);
+	return JSON.stringify(record, safeValue);
+}
+
+/** JSON.stringify replacer for values that are not JSON: a marker or a short string, never the whole value. */
+function safeValue(this: Record<string, unknown>, key: string, value: unknown): unknown {
+	const raw = this[key];
+	if (raw instanceof Uint8Array || raw instanceof ArrayBuffer) return `<bytes:${raw.byteLength}>`;
+	if (typeof raw === 'bigint') return raw.toString();
+	if (raw instanceof Error) return `${raw.name}: ${raw.message}`.slice(0, MAX_VALUE);
+	return value;
 }
 
 export function log(level: LogLevel, logger: string, message: string, extra?: Record<string, unknown>): void {
 	process.stderr.write(logLine(level, logger, message, extra) + '\n');
 }
 
-/** What a line says about a thrown value. `JSON.stringify(error)` gives `{}`, so never log the Error itself. */
+/** What a line says about a thrown value; log these fields rather than the Error itself. */
 export function exceptionFields(error: unknown): { exc_type: string; exc_message: string; traceback: string | null } {
 	if (error instanceof Error) return { exc_type: error.name, exc_message: error.message, traceback: error.stack ?? null };
 	return { exc_type: typeof error, exc_message: String(error), traceback: null };
@@ -57,17 +67,22 @@ function variants(value: string): string[] {
 	return [value, value.trim(), normalised, normalised.trim(), JSON.stringify(value).slice(1, -1), ...lines];
 }
 
-/** The texts to take out for one request: its body's content fields (any content type) and its token. */
-export function secretsOf(body: string | null, token: string | undefined, contentFields: readonly string[]): string[] {
-	let parsed: Record<string, unknown> | null = null;
+/** A request body's top-level fields: URL-encoded or multipart forms, and JSON whatever the
+ *  declared content type; null for anything else. Pass a copy (`request.clone()`). */
+export async function bodyFields(copy: Request): Promise<Record<string, unknown> | null> {
+	const type = copy.headers.get('content-type') ?? '';
 	try {
-		parsed = body ? JSON.parse(body) : null;
+		if (/application\/x-www-form-urlencoded|multipart\/form-data/.test(type)) return Object.fromEntries((await copy.formData()).entries());
+		const parsed: unknown = JSON.parse(await copy.text());
+		return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
 	} catch {
-		// Not JSON: no field to find.
+		return null;
 	}
-	const values = contentFields
-		.map((field) => (parsed && typeof parsed === 'object' ? parsed[field] : undefined))
-		.filter((value): value is string => typeof value === 'string');
+}
+
+/** The texts to take out for one request: its content fields and its token. */
+export function secretsOf(fields: Record<string, unknown> | null, token: string | undefined, contentFields: readonly string[]): string[] {
+	const values = contentFields.map((field) => fields?.[field]).filter((value): value is string => typeof value === 'string');
 	if (token) values.push(token);
 	const found = new Set(values.flatMap(variants).filter((value) => value.trim()));
 	// Longest first, so a value inside a longer one does not leave the rest of it behind.
@@ -97,7 +112,7 @@ export const limited = (text: string, max: number) => (text.length > max ? `${te
 ```ts
 import { randomUUID } from 'node:crypto';
 import { exceptionFields, log, withRequestId } from './log.ts';
-import { limited, redact, secretsOf } from './redact.ts';
+import { bodyFields, limited, redact, secretsOf } from './redact.ts';
 
 const REQUEST_ID = /^[\w.:-]{1,128}$/;
 const CONTENT_FIELDS = ['password', 'text', 'note'] as const;
@@ -116,18 +131,25 @@ export function redactorFor(request: Request): (text: string) => Promise<string>
 	const token = tokenOf(request);
 	let secrets: Promise<string[]> | undefined;
 	return async (text) => {
-		secrets ??= (copy ? copy.text().catch(() => null) : Promise.resolve(null)).then((body) => secretsOf(body, token, CONTENT_FIELDS));
+		secrets ??= (copy ? bodyFields(copy) : Promise.resolve(null)).then((fields) => secretsOf(fields, token, CONTENT_FIELDS));
 		return redact(text, await secrets);
 	};
 }
 
-/** One ERROR line for a response with status 500 or above, with the reason its JSON body gave. */
+/** Body field that carries a failure reason -> log field. `message` is the event name, so a body's
+ *  `message` (SvelteKit's error body) is logged as `detail`. */
+const REASON_FIELDS = { reason: 'reason', error: 'error', message: 'detail' } as const;
+
+/** One ERROR line for a response with status 500 or above, with the reasons its JSON body gave. */
 export async function logFailure(where: { method: string; path: string }, response: Response, redacted: (text: string) => Promise<string>) {
 	const body = response.headers.get('content-type')?.includes('application/json')
 		? await response.clone().json().catch(() => null)
 		: null;
-	const reason = typeof body?.reason === 'string' ? limited(await redacted(body.reason), MAX_REASON) : undefined;
-	log('ERROR', 'app.http', 'http_error', { ...where, status: response.status, reason });
+	const reasons: Record<string, string> = {};
+	for (const [field, name] of Object.entries(REASON_FIELDS)) {
+		if (typeof body?.[field] === 'string' && body[field]) reasons[name] = limited(await redacted(body[field]), MAX_REASON);
+	}
+	log('ERROR', 'app.http', 'http_error', { ...where, status: response.status, ...reasons });
 }
 
 export async function withRequestLogging(request: Request, handler: (request: Request) => Promise<Response>): Promise<Response> {
@@ -155,7 +177,7 @@ export async function withRequestLogging(request: Request, handler: (request: Re
 }
 ```
 
-Read whichever fields carry the failure reason in your API's error bodies (`reason`, `error`, `detail`); a field named `message` must be renamed because `message` is the event name.
+Add the fields that carry the failure reason in your API's error bodies to `REASON_FIELDS`.
 
 ## SvelteKit hooks
 
@@ -219,3 +241,7 @@ Declare `requestId: string` and `redact: (text: string) => Promise<string>` in `
 | Cutting a field, then redacting it | Redact first, then `limited` |
 | Expecting `AsyncLocalStorage` context in a framework's error hook | Keep the id on the request (`event.locals`) and re-enter with `withRequestId` |
 | `console.log` with a template string | Not JSON and no `request_id`; use `log` |
+
+## Not built in
+
+Receiving browser error reports. When you add an endpoint for them, follow the client-report rule in SKILL.md: log only what the server can validate, never the report's free text.
