@@ -5,7 +5,6 @@
 """Measure Obsidian Canvas text nodes from real rendering and suggest heights."""
 
 import argparse
-import hashlib
 import json
 import math
 import os
@@ -211,7 +210,7 @@ def run(canvas: str, vault: str | None, apply: bool, eval_js=obsidian_eval, emit
         exit_code = 1
         emit(f"FAILED, {len(failed)} node(s) not measured and never written:")
         for node, reason in failed:
-            emit(f"  {node['id']}: {reason}  [{_short(node['text'])}]")
+            emit(f"  {node['id']}: {reason}  (current {node.get('height')})  [{_short(node.get('text', ''))}]")
     if result.get("stopped"):
         exit_code = 1
         emit(f"Measuring stopped early: {result['stopped']}")
@@ -228,13 +227,9 @@ def run(canvas: str, vault: str | None, apply: bool, eval_js=obsidian_eval, emit
     emit("Check by eye: group labels and node labels are not covered. This tool cannot see them.")
     emit("")
 
-    current = file.read_bytes()
-    if current != before:
-        emit(
-            f"{rel} changed during measuring "
-            f"({hashlib.sha256(before).hexdigest()[:12]} -> {hashlib.sha256(current).hexdigest()[:12]}): "
-            "these numbers may be stale and nothing was written. Run again."
-        )
+    stale = f"{rel} changed during measuring: these numbers may be stale and nothing was written. Run again."
+    if file.read_bytes() != before:
+        emit(stale)
         return 1
     changes = {
         n["id"]: new_heights[n["id"]]
@@ -247,7 +242,7 @@ def run(canvas: str, vault: str | None, apply: bool, eval_js=obsidian_eval, emit
     if changes:
         new_text = set_heights(before.decode("utf-8"), changes)
         if file.read_bytes() != before:
-            emit(f"{rel} changed during measuring: nothing was written. Run again.")
+            emit(stale)
             return 1
         _write_atomic(file, new_text)
     emit(f"Applied: {len(changes)} height(s) written, nothing else in the file changed.")
@@ -262,7 +257,7 @@ def main() -> int:
     args = parser.parse_args()
     try:
         return run(args.canvas, args.vault, args.apply)
-    except ToolError as error:
+    except (ToolError, ValueError, KeyError) as error:  # bad canvas data counts as "could not run"
         print(f"error: {error}", file=sys.stderr)
         return 2
 

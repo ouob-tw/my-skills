@@ -125,7 +125,7 @@ class Run(unittest.TestCase):
         result["nodes"]["a"] = {"content": 0}
         self.assertEqual(self.run_tool(result, apply=True), 1)
         self.assertEqual(self.heights()[:2], [50, 110])
-        self.assertRegex(self.text(), r"FAILED.*\n.*\ba\b")
+        self.assertRegex(self.text(), r"FAILED.*\n  a: measured 0  \(current 50\)")
 
     def test_error_and_missing_nodes_are_failures(self):
         result = ok(b=95)
@@ -175,6 +175,17 @@ class Run(unittest.TestCase):
     def test_path_outside_vault_is_rejected(self):
         with self.assertRaises(cf.ToolError):
             self.run_tool(ok(a=100), path="/nowhere/else.canvas")
+
+
+class Main(unittest.TestCase):
+    def test_bad_canvas_data_exits_2_without_traceback(self):
+        def broken(*args, **kwargs):
+            raise ValueError("the edit would change more than node heights")
+
+        original, cf.run = cf.run, broken
+        self.addCleanup(setattr, cf, "run", original)
+        sys.argv = ["canvas_fit.py", "x.canvas"]
+        self.assertEqual(cf.main(), 2)
 
 
 if __name__ == "__main__":

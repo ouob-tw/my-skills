@@ -110,7 +110,7 @@
   let leaf = null;
   let canvas = null;
   let startViewport = null;
-  let fatal = null;
+  let stopReason = null;
   try {
     // Always the main window: a popout window hung for 120s when this was tried.
     const anchor = ws.getMostRecentLeaf(ws.rootSplit);
@@ -134,7 +134,7 @@
 
     for (const id of ids) {
       if (ws.activeLeaf !== leaf) {
-        fatal = "stopped: another tab became active while measuring";
+        stopReason = "another tab became active while measuring";
         break;
       }
       const node = canvas.nodes.get(id);
@@ -149,7 +149,7 @@
       }
     }
   } catch (error) {
-    fatal = String(error);
+    stopReason = String(error);
   }
 
   // Cleanup: leave the tabs, the active tab and this canvas's remembered viewport as they were.
@@ -165,5 +165,5 @@
     && (ws.floatingSplit?.children?.length ?? 0) === popoutsBefore
     && (!stillOnOurTab || ws.activeLeaf === previousLeaf)
     && windowIsBack();
-  return { nodes, restored, stopped: fatal, shownForRun };
+  return { nodes, restored, stopped: stopReason, shownForRun };
 })()
