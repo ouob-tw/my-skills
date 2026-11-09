@@ -21,14 +21,16 @@ compatibility: Requires uv (the script declares Pillow inline). Previewing needs
 
 1. 確認原圖是方形、至少 512 px、背景是滿版單色或滿版畫面（不是透明底）。
 2. 檢查構圖能否套圓形遮罩：Android 只保證中間直徑 80% 的圓不被裁到。頭、臉等辨識重點要在這個圓內；身體邊緣被切掉沒關係。重點超出時，請畫圖的人出一張往中間收的版本，只給 maskable 用。
-3. 切圖：
+3. 小尺寸（16/32 px）另備一張頭部或主體特寫。全身或半身構圖直接縮到 16 px 會糊成一團，五官看不出來；特寫版要跟大圖同背景色、同角色，讓兩者看起來是同一個圖示。使用者只有一張圖時略過，腳本會退回用主圖縮小。
+4. 切圖：
 
    ```bash
-   uv run scripts/make_icons.py <原圖.png> <專案靜態檔目錄>
+   uv run scripts/make_icons.py <原圖.png> <專案靜態檔目錄> [--small-source <特寫.png>]
    ```
 
-   預設圓角半徑是邊長的 22.5%，接近 iOS 的圓角；使用者想要不同弧度時用 `--radius` 調整。
-4. 寫 manifest，`any` 和 `maskable` 一定要指向**不同檔案**：
+   - 大圖預設圓角半徑是邊長的 22.5%，接近 iOS 的圓角；使用者想要不同弧度時用 `--radius` 調整。
+   - 給 `--small-source` 時，16/32/48 px 與 `favicon.ico` 改用特寫圖，縮小後做輕度銳化，圓角縮小到 12%/15%/18%（16 px 時 22.5% 的圓角會吃掉約 4 px 的畫面）。
+5. 寫 manifest，`any` 和 `maskable` 一定要指向**不同檔案**：
 
    ```json
    {
@@ -46,7 +48,7 @@ compatibility: Requires uv (the script declares Pillow inline). Previewing needs
    }
    ```
 
-5. 在頁面 `<head>` 加連結：
+6. 在頁面 `<head>` 加連結：
 
    ```html
    <link rel="icon" href="/favicon.ico" sizes="any" />
@@ -57,8 +59,8 @@ compatibility: Requires uv (the script declares Pillow inline). Previewing needs
    <meta name="theme-color" content="<app 底色>" />
    ```
 
-6. 驗收（全部通過才算完成）：
-   - 用無頭瀏覽器做一張預覽圖：淺色與深色分頁上的 16/32 px、圓角方形的 180 px、`border-radius: 50%` 的 maskable，實際看過再交付。
+7. 驗收（全部通過才算完成）：
+   - 用無頭瀏覽器做一張預覽圖：淺色與深色分頁上的 16/32 px（另附放大 8 倍、`image-rendering: pixelated` 的版本，才看得出五官有沒有糊掉）、圓角方形的 180 px、`border-radius: 50%` 的 maskable，實際看過再交付。
    - 檢查檔案：`any` 與 favicon 的左上角像素 alpha 為 0；`apple-touch-icon` 與 maskable 為 RGB（不透明）。
    - 部署後對每個檔案和 manifest 發請求，確認回應 200，且 manifest 是合法 JSON。
 
@@ -68,6 +70,6 @@ compatibility: Requires uv (the script declares Pillow inline). Previewing needs
 - `apple-touch-icon` 留透明角，iPhone 會把透明處填成黑色。
 - 只有 `any`、沒有 `maskable` 時，Android 常把圖縮小放進白色圓形底，看起來像被框住。
 - 縮圖時直接用圓角遮罩會出鋸齒，要先以 4 倍大小畫遮罩再縮小（腳本已處理）。
-- 角色只佔畫面一角、頭很小的構圖，16 px 時會糊成一團。提供多張候選時，優先選頭部佔比大的那張當圖示。
+- 全身構圖縮到 16 px 會糊成一團。優先用特寫圖給小尺寸（步驟 3）；只能用單張圖時，選頭部佔比大的那張。特寫圖與大圖構圖不同是正常取捨，只要背景色和角色配色一致就不違和。
 - 瀏覽器和手機會暫存舊圖示：分頁要重新整理，已加到主畫面的捷徑要刪掉重加，才會換成新圖。
 - SvelteKit adapter-node 等部分靜態伺服器回傳 `.ico` 時不帶 Content-Type，瀏覽器仍能顯示，也有 PNG 版可用，不必為此改伺服器。
