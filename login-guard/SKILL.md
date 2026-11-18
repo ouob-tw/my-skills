@@ -5,11 +5,9 @@ description: Use when adding or reviewing login protection for a web app (FastAP
 
 # 登入防護
 
-給管理後台這類「只有少數人該進來」的網站用：由外往內一層一層擋，每一層都假設外面那層可能失守。規則與理由寫在各主題的參考檔，Node（SvelteKit，TypeScript）與 FastAPI（Python）的關鍵片段放在同一份裡對照。
+給管理後台這類「只有少數人該進來」的網站用：由外往內一層一層擋，每一層都假設外面那層可能失守。
 
 ## 防線順序
-
-照這個順序做，外層先擋掉大部分人，內層才處理真的到得了登入頁的人：
 
 | 順序 | 防線 | 為什麼放這裡 | 參考檔 |
 |---|---|---|---|
@@ -37,7 +35,8 @@ description: Use when adding or reviewing login protection for a web app (FastAP
 - 國家限制只寫在 `location /` 會被繞過：NPM 的 Cache Assets 會另加比對 `.js`、`.png` 的 location。擋在 `server` 層級。
 - 只刪 `.mmdb` 而留著引用它的 `geoip2` 設定，`nginx -t` 會失敗，代理一重啟整台機器的網站都起不來。
 - uvicorn 預設開著 proxy headers，並相信 `127.0.0.1`、`::1` 送來的 `X-Forwarded-For`：用 `--no-proxy-headers` 啟動，自己判斷。
-- adapter-node 送靜態檔不經過 `hooks.server.ts`；沒設 `PROTOCOL_HEADER` 時 `event.url.protocol` 一律是 https。SvelteKit 3 用 `#lib/...` 匯入、`Handle` 從 `@sveltejs/kit/hooks` 匯入。
+- adapter-node 送靜態檔不經過 `hooks.server.ts`；沒設 `PROTOCOL_HEADER` 時 `event.url.protocol` 一律是 https。
+- scrypt 用 N=2^15、r=8 時，Python 與 Node 都要明確傳 `maxmem`，預設上限太小會直接丟錯。
 - 壞掉的 `.mmdb` 讓 Python `geoip2` 丟 `maxminddb.InvalidDatabaseError`（屬於 `RuntimeError`），不是 `OSError`。
 - 密碼對了就清除失敗計數，攻擊者每猜一次 TOTP 前先送一次正確密碼，就永遠不會被鎖。
 - `pyotp` 的 `verify()` 只回答對錯，不告訴你是哪一步，做不到「每組只能用一次」。
@@ -50,5 +49,6 @@ description: Use when adding or reviewing login protection for a web app (FastAP
 ## 套用時
 
 1. 決定第 1 層能不能在代理做；能的話第 3 層可以不做。
-2. 依上表順序讀參考檔，照各檔的規則實作，片段改成專案自己的儲存方式（資料庫、Redis）。
-3. 跑 [checklist.md](references/checklist.md) 的每一項，全部打勾才算完成；沒做的項目在交付說明裡寫出原因。
+2. 只讀這次要做或要審的那幾層的參考檔（上表最右欄），不必全部讀。只做第 4 層以後也要讀 [client-ip.md](references/client-ip.md)：鎖定與紀錄用它算的真實 IP。參考檔裡 Node 與 FastAPI 片段並列，只看專案用的那種。
+3. 照各檔的規則實作。片段都執行驗證過，邏輯照用，只把儲存換成專案自己的（資料庫、Redis）。
+4. 跑 [checklist.md](references/checklist.md) 的每一項，全部打勾才算完成；沒做的項目在交付說明裡寫出原因。

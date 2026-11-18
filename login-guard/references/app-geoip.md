@@ -2,7 +2,7 @@
 
 沒有能設定的代理，或想多一層時才做。規則與理由：
 
-- 判斷用第 2 層算出的真實 IP。
+- 判斷用第 2 層算出的真實 IP（[client-ip.md](client-ip.md)）。
 - **例外清單先比**：本機與你自己的內網段（從設定讀），不查資料庫。
 - **查不到國家就擋**（`AddressNotFoundError`、不是 IP）。
 - **沒有資料庫就只放例外清單**。資料庫壞掉時「全部放行」等於限制失效而沒人發現；真要選放行，寫成明確的設定與紀錄，不要當預設。
@@ -79,5 +79,3 @@ class CountryGate:
         except (geoip2.errors.AddressNotFoundError, ValueError):
             return False
 ```
-
-以上 Node 與 Python 片段已用 MaxMind 官方測試資料庫（`GeoIP2-Country-Test.mmdb`）實測：沒有資料庫時內網放行、外部擋；查不到國家擋；替換失敗保留舊資料。

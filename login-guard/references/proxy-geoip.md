@@ -11,8 +11,6 @@
 
 ## nginx（含 ngx_http_geoip2_module）
 
-已在 nginx 1.26 + ngx_http_geoip2_module 實測：國外來源有無資料庫都 403、允許的國家 200、偽造的 `X-Forwarded-For`／`X-Real-IP` 被換成實際來源。
-
 ```nginx
 # --- http {} 層級 ---
 # 國家：裝好驗證過的資料庫之前是空的，所以只有內網規則能放行（寧可擋錯）。
@@ -66,7 +64,7 @@ geoip2 /etc/nginx/geoip/GeoLite2-Country.mmdb {
 - 先確認映像檔有模組：`ls /usr/lib/nginx/modules/ | grep geoip2`。
 - `load_module` 放 `data/nginx/custom/root_top.conf`；上面 http 層級的 `map`、`geo`、`include` 放 `data/nginx/custom/http_top.conf`。這兩個檔 NPM 重建設定時會保留。
 - `set_real_ip_from`、`if` 與 `location /` 放在該站的 Advanced 欄位；Advanced 裡寫了 `location /` 時，NPM 不再產生自己的，所以要把它原本的 `proxy_set_header` 也搬進來。
-- 關掉該站的 Cache Assets，或確認 `if` 在 server 層級。改完用 NPM 介面再存一次該站，確認規則還在。
+- 改完用 NPM 介面再存一次該站，確認規則還在。
 
 ## 資料庫來源與每日更新
 
@@ -74,7 +72,7 @@ geoip2 /etc/nginx/geoip/GeoLite2-Country.mmdb {
 - 不想註冊帳號時，才用第三方轉載的 GeoLite2 `.mmdb`（例如 GitHub releases 上的鏡像）配下面的更新程式。它不是官方，對方停更或下載失敗時會一直用舊資料，國家判斷慢慢不準，所以失敗一定要留紀錄。
 - 每天一次，用 systemd timer 或 cron；排程寫明時區（UTC）並加隨機延遲，避免整點一起下載。
 
-更新程式（下載 → 驗證 → 原子替換 → 重新載入；任何一步失敗都還原舊檔、exit 1、錯誤寫到 stderr 進 journal）。已實測：下載 404、壞檔、正常、未變更、正常後再給壞檔（舊檔保留）、nginx 不接受新檔（還原舊檔或回到沒有資料庫的狀態）。
+更新程式（下載 → 驗證 → 原子替換 → 重新載入；任何一步失敗都還原舊檔、exit 1、錯誤寫到 stderr 進 journal）：
 
 ```sh
 #!/bin/sh

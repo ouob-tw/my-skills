@@ -13,7 +13,7 @@
 
 - 伺服器產生、存在伺服器，**只能回答一次**（驗證前先取走並刪除），幾分鐘就過期。
 - **綁定發起者**：第二步的挑戰值記在這個瀏覽器開著的第二步上；設定頁登記的挑戰值綁定發起的 session（另發一個只在記憶體、5 分鐘、只能用一次的登記 token）；免密碼登入的挑戰值誰都能要，所以存的數量設上限（例如 1000 個，滿了丟最舊的）。
-- 要挑戰值（options 端點）不證明任何事，不算失敗次數。
+- 要挑戰值的 options 端點不呼叫 `limit`（[two-step-login.md](two-step-login.md)）。
 
 **登記**
 
@@ -33,10 +33,6 @@
 - **簽章計數器**：兩邊的函式庫都會拒絕「任一方不為 0 且新值沒有變大」的回應。寫回新值要用比較後寫入（`UPDATE ... SET counter = :new WHERE id = :id AND counter = :old`），兩個同時的登入才不會都通過；期間被刪掉的 passkey 也不會通過。
 - 驗證失敗（簽章、來源、挑戰值、計數器、UV）一律算一次失敗；通過才 `succeeded` 並建 session。
 - 刪除 passkey 後它立刻不能登入；刪除要先確認。
-
-**紀錄**
-
-- 瀏覽器端的 WebAuthn 錯誤（`NotAllowedError`、`InvalidStateError` 等）回報給伺服器，記成該事件的 `failure`、`reason` 是錯誤名稱；名稱不在已知清單內就記 `other`，回報本身限長度、限頻率。見 [session-and-headers.md](session-and-headers.md)。
 
 ## Node：`@simplewebauthn/server`
 
@@ -115,25 +111,7 @@ export async function verifyLogin(site: Site, expectedChallenge: string, respons
 }
 ```
 
-瀏覽器端（`@simplewebauthn/browser` v13 起參數包在 `optionsJSON` 裡）：
-
-```ts
-import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
-
-// 設定頁登記
-const { options, enrollment } = await (await fetch('/api/passkeys/options', { method: 'POST' })).json();
-try {
-	const response = await startRegistration({ optionsJSON: options });
-	await fetch('/api/passkeys', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ enrollment, response }) });
-} catch (error) {
-	// InvalidStateError：這台裝置已經有 passkey。把 error.name 回報給伺服器記錄。
-}
-
-// 免密碼登入
-const loginOptions = await (await fetch('/api/login/passwordless/options', { method: 'POST' })).json();
-const answer = await startAuthentication({ optionsJSON: loginOptions });
-await fetch('/api/login/passwordless', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ response: answer }) });
-```
+瀏覽器端：`@simplewebauthn/browser` v13 起參數包在 `{ optionsJSON }` 裡（`startRegistration({ optionsJSON: options })`）；`catch` 到的錯誤把 `error.name` 回報給伺服器記錄（[session-and-headers.md](session-and-headers.md) 的登入紀錄）。
 
 ## Python：`webauthn`（py_webauthn）
 
@@ -248,7 +226,3 @@ def verify_login(site: Site, challenge: bytes, credential: dict, passkey: Stored
 ```
 
 FastAPI 端點的順序與 [two-step-login.md](two-step-login.md) 相同：options 端點產生挑戰值並存起來；驗證端點 `admit` → 取走挑戰值 → 用回應的 `id` 找 passkey → `verify_login` → 比較後寫入計數器 → `succeeded` 或 `failed` → 建 session。
-
-## 已驗證的部分
-
-兩份伺服器端片段都用同一個軟體驗證器（ES256、`none` 認證）實測：登記成功（含沒有 UV 的金鑰）、來源不對被拒、格式錯回 None、免密碼登入成功、重送同一個簽章被拒（計數器沒變大）、拿別的挑戰值的回答被拒、單獨登入沒有 UV 被拒、當第二步時沒有 UV 可通過、`excludeCredentials` 帶入已登記的 passkey。瀏覽器端片段只對照了 `@simplewebauthn/browser` v14 的型別定義，沒有在瀏覽器裡跑。

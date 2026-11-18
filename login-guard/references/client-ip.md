@@ -3,11 +3,8 @@
 規則與理由：
 
 - **允許連線清單**（看 socket 位址，IP 或 CIDR）：不在清單上就 403，在任何路由之前，包括靜態檔與框架自己的錯誤頁。沒設定時只放本機，更新後才不會意外對外開放。能繞過代理直連，代理上的國家限制與真實 IP 都沒有意義。
-- **信任代理清單**：socket 位址在清單上，才讀 `X-Forwarded-For`。由右往左取第一個不是信任代理的位址（最右邊是離程式最近的代理加上的，左邊的可能是訪客自己帶的）；全是信任代理時取最左邊；任何一項不是 IP 就整串不用，改用 socket 位址。`X-Real-IP`、`CF-Connecting-IP` 一律不讀：代理沒覆寫時，訪客送什麼就是什麼。
+- **信任代理清單**：socket 位址在清單上，才讀 `X-Forwarded-For`，由右往左取第一個不是信任代理的位址：最右邊是離程式最近的代理加上的，左邊的可能是訪客自己帶的。`X-Real-IP`、`CF-Connecting-IP` 一律不讀：代理沒覆寫時，訪客送什麼就是什麼。
 - **HTTPS 只信代理說的**：socket 位址是信任代理且 `X-Forwarded-Proto: https` 才算。它決定 Cookie 的 `Secure`、HSTS、passkey 能不能用。
-- 雙協定 socket 把 IPv4 報成 `::ffff:a.b.c.d`，比對前先轉回 IPv4。
-- 清單裡有不是 IP／CIDR 的項目，啟動時就失敗，不要默默略過。
-- 這兩份清單與真實 IP 只在入口算一次，放進 request 狀態，鎖定、GeoIP、紀錄都讀它。
 
 ## Node（TypeScript）
 
@@ -52,7 +49,7 @@ SvelteKit（adapter-node）接法：
 
 - adapter-node 自己送出的靜態檔不經過 `hooks.server.ts`，所以允許清單要在更外面擋：用 adapter-node 的自訂伺服器，先檢查再交給 `handler`。
 - 不要設 `ADDRESS_HEADER`、`XFF_DEPTH`，`getClientAddress()` 才是 socket 位址。`event.url.protocol` 不可信（沒設 `PROTOCOL_HEADER`／`ORIGIN` 時 adapter-node 一律當 https），改用 `viaHttps`。
-- `hooks.server.ts` 再設一次標頭：SvelteKit 寫出的同名標頭會蓋掉自訂伺服器先放的。回應已經有 CSP 時用 `append` 加成第二條政策，`set` 會把它（例如上傳檔案的 `sandbox`）換成較寬鬆的預設值。`handle` 裡自己 `throw redirect()` 的回應不經過 `resolve` 之後的程式，要標頭就直接 `return new Response(null, { status: 303, headers: { location } })`。`vite dev` 不經自訂伺服器，靠 `handle` 這段擋。
+- `hooks.server.ts` 再設一次標頭：SvelteKit 寫出的同名標頭會蓋掉自訂伺服器先放的。`handle` 裡自己 `throw redirect()` 的回應不經過 `resolve` 之後的程式，要標頭就直接 `return new Response(null, { status: 303, headers: { location } })`。`vite dev` 不經自訂伺服器，靠 `handle` 這段擋。
 
 ```js
 // server.js：取代 `node build`。直接匯入 .ts 要 Node 22.6 以上加 --experimental-strip-types（23.6 起不用加）
@@ -92,8 +89,8 @@ export const handle: Handle = async ({ event, resolve }) => {
 	event.locals.https = https;
 	const response = allowedPeers(peer) ? await resolve(event) : new Response('Forbidden', { status: 403 });
 	for (const [name, value] of securityHeaders(https)) {
-		// 回應已有自己的 CSP（例如上傳檔案的 sandbox）時加成第二條政策，兩條都生效；不要蓋掉它
-		if (name === 'content-security-policy' && response.headers.has(name)) response.headers.append(name, value);
+		// 回應已有自己的 CSP（例如上傳檔案的 sandbox）時加成第二條政策，兩條都生效；set 會蓋掉它
+		if (name.toLowerCase() === 'content-security-policy' && response.headers.has(name)) response.headers.append(name, value);
 		else response.headers.set(name, value);
 	}
 	return response;
@@ -182,7 +179,7 @@ def install_guard(app: FastAPI) -> None:
                 logger.exception("unhandled_error")
                 response = PlainTextResponse("Internal Server Error", status_code=500)
         for name, value in security_headers(https):
-            if name == "Content-Security-Policy" and name in response.headers:
+            if name.lower() == "content-security-policy" and name in response.headers:
                 response.headers.append(name, value)  # 保留回應自己的 CSP（例如 sandbox），兩條都生效
             else:
                 response.headers.setdefault(name, value)
