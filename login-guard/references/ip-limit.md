@@ -284,14 +284,15 @@ from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse
 
 from .client_ip import client_ip, ip_list, via_https
-from .geoip import CountryGate  # 第 3 層，不做就拿掉
+from .geoip import CountryGate  # 第 3 層；不做第 3 層就刪掉這行
 from .security_headers import security_headers  # 見 session-and-headers.md
 
 logger = logging.getLogger(__name__)
 
 TRUSTED_PROXIES = ip_list("192.0.2.10")
 ALLOWED_PEERS = ip_list("127.0.0.1, ::1, 192.0.2.10")
-gate = CountryGate("/var/lib/geoip/GeoLite2-Country.mmdb", {"TW"}, ip_list("127.0.0.0/8, ::1, 198.51.100.0/24"))  # 例外：本機與你自己的內網
+# 第 3 層；例外清單是本機與你自己的內網。不做第 3 層（代理已擋國家）就改成 gate = None
+gate = CountryGate("/var/lib/geoip/GeoLite2-Country.mmdb", {"TW"}, ip_list("127.0.0.0/8, ::1, 198.51.100.0/24"))
 
 
 def install_guard(app: FastAPI) -> None:
@@ -301,7 +302,7 @@ def install_guard(app: FastAPI) -> None:
         https = via_https(peer, request.headers.get("x-forwarded-proto"), TRUSTED_PROXIES)
         ip = client_ip(peer, request.headers.get("x-forwarded-for"), TRUSTED_PROXIES)
         request.state.client_ip, request.state.https = ip, https
-        if not ALLOWED_PEERS(peer) or not gate.allows(ip):
+        if not ALLOWED_PEERS(peer) or (gate is not None and not gate.allows(ip)):
             response = PlainTextResponse("Forbidden", status_code=403)
         else:
             try:
@@ -325,7 +326,7 @@ def install_guard(app: FastAPI) -> None:
 - **例外清單先比**：本機與你自己的內網段（從設定讀），不查資料庫。
 - **查不到國家就擋**（`AddressNotFoundError`、不是 IP）。
 - **沒有資料庫就只放例外清單**。資料庫壞掉時「全部放行」等於限制失效而沒人發現；真要選放行，寫成明確的設定與紀錄，不要當預設。
-- **資料庫被替換後重新開啟**：更新程式原子替換檔案後，程式要重開 reader（例如每小時比一次檔案修改時間，或收到訊號時）。重開失敗就保留舊的 reader。用上面第 1 層的更新程式時，拿掉寫 `country.conf` 與重新載入 nginx 的最後幾行，改成通知程式。
+- **資料庫被替換後重新開啟**：更新程式原子替換檔案後，程式要重開 reader（例如每小時比一次檔案修改時間，或收到訊號時）。重開失敗就保留舊的 reader。沿用上面第 1 層的更新程式時：刪掉寫 `country.conf` 的那個 `if` 區塊；把 `if ! nginx -t || ! nginx -s reload; then` 的條件換成通知程式重新載入的指令（例如 `systemctl kill -s HUP <服務>`），失敗時的還原照舊；區塊裡另一行 `nginx -t && nginx -s reload || true` 也刪掉。
 - 被擋時寫一行紀錄，帶真實 IP 與查到的國家碼。
 
 ### Node：`@maxmind/geoip2-node`
