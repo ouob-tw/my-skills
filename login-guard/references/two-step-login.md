@@ -35,7 +35,22 @@ def check_password(password: str, stored: str) -> bool:
     return hmac.compare_digest(given, expected)
 ```
 
-Node 用 `node:crypto` 的 `scrypt`（非同步版，免得卡住事件迴圈）加同樣參數與 `timingSafeEqual`。
+Node 用 `node:crypto` 的 `scrypt`（非同步版，免得卡住事件迴圈）與 `timingSafeEqual`。`maxmem` 一樣要明確給，Node 預設 32 MiB，N=2^15、r=8 會丟 `memory limit exceeded`：
+
+```ts
+// password.ts（雜湊部分；儲存格式同上）
+import { randomBytes, scrypt } from 'node:crypto';
+import { promisify } from 'node:util';
+
+const N = 2 ** 15, R = 8, P = 1;
+const scryptAsync = promisify(scrypt) as (password: string, salt: Buffer, length: number, options: object) => Promise<Buffer>;
+
+export async function hashPassword(password: string): Promise<string> {
+	const salt = randomBytes(16);
+	const digest = await scryptAsync(password, salt, 32, { N, r: R, p: P, maxmem: 128 * N * R * 2 });
+	return `scrypt$${N}$${R}$${P}$${salt.toString('base64')}$${digest.toString('base64')}`;
+}
+```
 
 ## 第二步：TOTP
 
@@ -267,7 +282,7 @@ SvelteKit 的 `+server.ts` 照同樣順序寫：`cookies.set(STEP_COOKIE, token,
 - **所有步驟共用一個計數**：密碼錯、TOTP 錯、passkey 驗證失敗、登記時密碼或登記碼錯，都算一次。分開算，猜六位數就有自己的 5 次。
 - **只有整個登入成功、要發登入 Cookie 時才清除**。密碼對但還沒過第二步用 `refund`：不加也不清。若密碼對就清，攻擊者每猜一次數字前先送一次正確密碼，就永遠不會被鎖。
 - **先 `admit` 再比對，並把進行中的嘗試算進去**：同時送 50 個請求的人，也只拿到剩下的次數。
-- **不算次數的情況用 `refund`**：第二步過期、伺服器讀不到設定檔、拿 passkey 挑戰值。
+- **不算次數的情況用 `refund`**：第二步過期、伺服器讀不到設定檔。拿 passkey 挑戰值的 options 端點根本不呼叫 `limit`（沒有 `admit` 就 `refund` 會丟錯或讓次數變多）。
 - **重啟不清除**：失敗次數與鎖定到期時間存到資料庫、Redis，或權限 600 的檔案（寫暫存檔再 rename）。進行中的嘗試只在記憶體。
 - 追蹤的來源數設上限，滿了先丟掉沒鎖、也沒有進行中嘗試的最舊來源。
 - 被鎖時回 429 加 `Retry-After`；鎖定開始時寫一行 `login_locked` 紀錄（只寫一次，帶當時的事件），見 [session-and-headers.md](session-and-headers.md)。
