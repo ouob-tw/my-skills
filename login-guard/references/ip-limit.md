@@ -326,7 +326,7 @@ def install_guard(app: FastAPI) -> None:
 - **例外清單先比**：本機與你自己的內網段（從設定讀），不查資料庫。
 - **查不到國家就擋**（`AddressNotFoundError`、不是 IP）。
 - **沒有資料庫就只放例外清單**。資料庫壞掉時「全部放行」等於限制失效而沒人發現；真要選放行，寫成明確的設定與紀錄，不要當預設。
-- **資料庫被替換後重新開啟**：更新程式原子替換檔案後，程式要重開 reader（例如每小時比一次檔案修改時間，或收到訊號時）。重開失敗就保留舊的 reader。沿用上面第 1 層的更新程式時：刪掉寫 `country.conf` 的那個 `if` 區塊；把 `if ! nginx -t || ! nginx -s reload; then` 的條件換成通知程式重新載入的指令（例如 `systemctl kill -s HUP <服務>`），失敗時的還原照舊；區塊裡另一行 `nginx -t && nginx -s reload || true` 也刪掉。
+- **資料庫被替換後重新開啟**：更新程式原子替換檔案後，程式要重開 reader（例如每小時比一次檔案修改時間，或收到訊號時）。重開失敗就保留舊的 reader。沿用上面第 1 層的更新程式時：刪掉寫 `country.conf` 的那個 `if` 區塊；把 `if ! nginx -t || ! nginx -s reload; then` 整行換成 `if ! systemctl kill -s HUP <服務>; then`（或其他通知程式重新載入的指令，前面的 `!` 要留著：通知失敗才進還原），區塊裡的還原照舊，`FAILED` 訊息裡的 nginx 改成你的服務名稱；區塊裡另一行 `nginx -t && nginx -s reload || true` 也刪掉。
 - 被擋時寫一行紀錄，帶真實 IP 與查到的國家碼。
 
 ### Node：`@maxmind/geoip2-node`
