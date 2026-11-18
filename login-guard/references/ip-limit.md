@@ -30,7 +30,7 @@ include /etc/nginx/geoip/country[.]conf;
 geo $realip_remote_addr $login_lan {
     default          0;
     127.0.0.0/8      1;
-    192.168.50.0/24  1;   # 換成你自己的內網
+    198.51.100.0/24  1;   # 換成你自己的內網
 }
 
 map "$login_lan:$login_country" $login_allowed {
@@ -80,7 +80,7 @@ geoip2 /etc/nginx/geoip/GeoLite2-Country.mmdb {
 - 不想註冊帳號時，才用第三方轉載的 GeoLite2 `.mmdb`（例如 GitHub releases 上的鏡像）配下面的更新程式。它不是官方，對方停更或下載失敗時會一直用舊資料，國家判斷慢慢不準，所以失敗一定要留紀錄。
 - 每天一次，用 systemd timer 或 cron；排程寫明時區（UTC）並加隨機延遲，避免整點一起下載。
 
-更新程式（下載 → 驗證 → 原子替換 → 重新載入；任何一步失敗都保留舊檔、exit 1、錯誤寫到 stderr 進 journal）。已實測：下載 404、壞檔、正常、未變更、正常後再給壞檔（舊檔保留）。
+更新程式（下載 → 驗證 → 原子替換 → 重新載入；任何一步失敗都還原舊檔、exit 1、錯誤寫到 stderr 進 journal）。已實測：下載 404、壞檔、正常、未變更、正常後再給壞檔（舊檔保留）、nginx 不接受新檔（還原舊檔或回到沒有資料庫的狀態）。
 
 ```sh
 #!/bin/sh
@@ -97,14 +97,31 @@ mmdblookup --file "$tmp" --ip "$CHECK_IP" country iso_code >/dev/null 2>&1 \
     || { echo "FAILED: not a usable country database" >&2; exit 1; }
 if [ -f "$DB" ] && cmp -s "$tmp" "$DB"; then echo "unchanged"; exit 0; fi
 chmod 644 "$tmp"
+[ -f "$DB" ] && cp -p "$DB" "$DB.prev"
 mv "$tmp" "$DB"
+new_conf=0
 # 啟用查詢的 include 只在有了有效資料庫之後才寫。
-[ -f "$DIR/country.conf" ] || cat > "$DIR/country.conf" <<CONF
+if [ ! -f "$DIR/country.conf" ]; then
+    cat > "$DIR/country.conf" <<CONF
 geoip2 $DB {
     \$login_country source=\$realip_remote_addr country iso_code;
 }
 CONF
-nginx -t && nginx -s reload
+    new_conf=1
+fi
+# set -e 不管 if 條件與 && 左邊的失敗，所以這裡明確處理：nginx 不接受就還原，維持原本能運作的狀態。
+if ! nginx -t || ! nginx -s reload; then
+    if [ -f "$DB.prev" ]; then
+        mv "$DB.prev" "$DB"
+    else
+        rm -f "$DIR/country.conf" "$DB"   # 先前沒有資料庫：回到「只放內網」
+    fi
+    [ "$new_conf" = 1 ] && rm -f "$DIR/country.conf"
+    nginx -t && nginx -s reload || true
+    echo "FAILED: nginx rejected the new database; previous state restored" >&2
+    exit 1
+fi
+rm -f "$DB.prev"
 echo "updated"
 ```
 
@@ -164,7 +181,7 @@ SvelteKit（adapter-node）接法：
 
 - adapter-node 自己送出的靜態檔不經過 `hooks.server.ts`，所以允許清單要在更外面擋：用 adapter-node 的自訂伺服器，先檢查再交給 `handler`。
 - 不要設 `ADDRESS_HEADER`、`XFF_DEPTH`，`getClientAddress()` 才是 socket 位址。`event.url.protocol` 不可信（沒設 `PROTOCOL_HEADER`／`ORIGIN` 時 adapter-node 一律當 https），改用 `viaHttps`。
-- `hooks.server.ts` 再設一次標頭：SvelteKit 寫出的同名標頭會蓋掉自訂伺服器先放的。`handle` 裡自己 `throw redirect()` 的回應不經過 `resolve` 之後的程式，要標頭就直接 `return new Response(null, { status: 303, headers: { location } })`。`vite dev` 不經自訂伺服器，靠 `handle` 這段擋。
+- `hooks.server.ts` 再設一次標頭：SvelteKit 寫出的同名標頭會蓋掉自訂伺服器先放的。回應已經有 CSP 時用 `append` 加成第二條政策，`set` 會把它（例如上傳檔案的 `sandbox`）換成較寬鬆的預設值。`handle` 裡自己 `throw redirect()` 的回應不經過 `resolve` 之後的程式，要標頭就直接 `return new Response(null, { status: 303, headers: { location } })`。`vite dev` 不經自訂伺服器，靠 `handle` 這段擋。
 
 ```js
 // server.js：取代 `node build`。直接匯入 .ts 要 Node 22.6 以上加 --experimental-strip-types（23.6 起不用加）
@@ -203,7 +220,11 @@ export const handle: Handle = async ({ event, resolve }) => {
 	event.locals.clientIp = clientIp(peer, event.request.headers.get('x-forwarded-for'), trustedProxies);
 	event.locals.https = https;
 	const response = allowedPeers(peer) ? await resolve(event) : new Response('Forbidden', { status: 403 });
-	for (const [name, value] of securityHeaders(https)) response.headers.set(name, value);
+	for (const [name, value] of securityHeaders(https)) {
+		// 回應已有自己的 CSP（例如上傳檔案的 sandbox）時加成第二條政策，兩條都生效；不要蓋掉它
+		if (name === 'content-security-policy' && response.headers.has(name)) response.headers.append(name, value);
+		else response.headers.set(name, value);
+	}
 	return response;
 };
 ```
@@ -257,6 +278,8 @@ def via_https(peer: str, forwarded_proto: str | None, trusted: Callable[[str], b
 
 ```python
 # guard.py：中介層在路由之前執行，同一個 app 掛的 StaticFiles 也經過它
+import logging
+
 from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse
 
@@ -264,9 +287,11 @@ from .client_ip import client_ip, ip_list, via_https
 from .geoip import CountryGate  # 第 3 層，不做就拿掉
 from .security_headers import security_headers  # 見 session-and-headers.md
 
+logger = logging.getLogger(__name__)
+
 TRUSTED_PROXIES = ip_list("192.0.2.10")
 ALLOWED_PEERS = ip_list("127.0.0.1, ::1, 192.0.2.10")
-gate = CountryGate("/var/lib/geoip/GeoLite2-Country.mmdb", {"TW"}, ip_list("127.0.0.0/8, ::1, 192.168.50.0/24"))
+gate = CountryGate("/var/lib/geoip/GeoLite2-Country.mmdb", {"TW"}, ip_list("127.0.0.0/8, ::1, 198.51.100.0/24"))  # 例外：本機與你自己的內網
 
 
 def install_guard(app: FastAPI) -> None:
@@ -279,9 +304,16 @@ def install_guard(app: FastAPI) -> None:
         if not ALLOWED_PEERS(peer) or not gate.allows(ip):
             response = PlainTextResponse("Forbidden", status_code=403)
         else:
-            response = await call_next(request)
+            try:
+                response = await call_next(request)
+            except Exception:  # 讓 500 也帶標頭；Starlette 自己的 500 頁在這層外面產生
+                logger.exception("unhandled_error")
+                response = PlainTextResponse("Internal Server Error", status_code=500)
         for name, value in security_headers(https):
-            response.headers.setdefault(name, value)
+            if name == "Content-Security-Policy" and name in response.headers:
+                response.headers.append(name, value)  # 保留回應自己的 CSP（例如 sandbox），兩條都生效
+            else:
+                response.headers.setdefault(name, value)
         return response
 ```
 

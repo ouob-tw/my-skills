@@ -20,7 +20,7 @@
 - **登入後在設定登記**：已登入的 session 不需要登記碼，直接新增。
 - **第一次還沒有任何能登入的裝置時**：用主機指令產生一次性登記碼（10 分鐘、用一次就失效、只存雜湊，新的取代舊的），登記時要密碼加登記碼。登記不發登入 Cookie。只要已經設好任何一種第二步，登入頁就不再顯示登記入口。
 - `excludeCredentials` 帶已登記的 passkey，同一台裝置不會重複登記。瀏覽器回 `InvalidStateError` 時，頁面直接說「這台裝置已經有 passkey，直接用它登入」，不要只說失敗。
-- `userVerification: 'required'`（要 PIN、指紋或螢幕鎖），登記的 passkey 才能單獨登入；`residentKey: 'preferred'`；`attestationType: 'none'`。
+- 登記用 `userVerification: 'preferred'`，驗證登記時不要求 UV（使用者驗證：PIN、指紋或螢幕鎖），沒有 PIN 的實體安全金鑰才登記得進來、當第二步用。免密碼登入是否安全由**登入時**的 UV 檢查保證，不靠登記時；`residentKey: 'preferred'`；`attestationType: 'none'`。
 - `userID` 用每個使用者固定的隨機位元組，不要放 email 或資料庫編號：它會存在驗證器上。
 - 存：credential ID、公鑰（base64url）、簽章計數器、transports、登記時的 User-Agent（顯示名稱用）、登記與最後使用時間。設定頁只回傳顯示用欄位，credential ID 與公鑰留在伺服器。
 - 設定頁登記失敗不要回 401：前端通常把 401 當成「已登出」而重新載入。用 400 `passkey_failed`、410 `enroll_expired`。
@@ -65,14 +65,20 @@ export function registrationOptions(site: Site, user: { id: Uint8Array; name: st
 		userName: user.name,
 		attestationType: 'none',
 		excludeCredentials: existing.map(({ id, transports }) => ({ id, transports })),
-		authenticatorSelection: { residentKey: 'preferred', userVerification: 'required' },
+		authenticatorSelection: { residentKey: 'preferred', userVerification: 'preferred' },
 		timeout: 120_000
 	});
 }
 
 export async function verifyRegistration(site: Site, expectedChallenge: string, response: RegistrationResponseJSON): Promise<StoredPasskey | null> {
 	try {
-		const result = await verifyRegistrationResponse({ response, expectedChallenge, expectedOrigin: site.origin, expectedRPID: site.rpID });
+		const result = await verifyRegistrationResponse({
+			response,
+			expectedChallenge,
+			expectedOrigin: site.origin,
+			expectedRPID: site.rpID,
+			requireUserVerification: false // 預設 true；UV 在免密碼登入時才檢查
+		});
 		if (!result.verified) return null;
 		const { credential } = result.registrationInfo;
 		return { id: credential.id, publicKey: Buffer.from(credential.publicKey).toString('base64url'), counter: credential.counter, transports: credential.transports ?? [] };
@@ -188,7 +194,7 @@ def registration_options(site: Site, user_id: bytes, user_name: str, existing: l
         exclude_credentials=[_descriptor(p) for p in existing],
         authenticator_selection=AuthenticatorSelectionCriteria(
             resident_key=ResidentKeyRequirement.PREFERRED,
-            user_verification=UserVerificationRequirement.REQUIRED,
+            user_verification=UserVerificationRequirement.PREFERRED,
         ),
         timeout=120_000,
     )
@@ -202,7 +208,7 @@ def verify_registration(site: Site, challenge: bytes, credential: dict) -> Store
             expected_challenge=challenge,
             expected_rp_id=site.rp_id,
             expected_origin=site.origin,
-            require_user_verification=True,  # py_webauthn 預設 False
+            require_user_verification=False,  # UV 在免密碼登入時才檢查
         )
     except WebAuthnException:  # 簽章、來源、挑戰值不對，或格式錯
         return None
@@ -245,4 +251,4 @@ FastAPI 端點的順序與 [two-step-login.md](two-step-login.md) 相同：optio
 
 ## 已驗證的部分
 
-兩份伺服器端片段都用同一個軟體驗證器（ES256、`none` 認證）實測：登記成功、來源不對被拒、格式錯回 None、免密碼登入成功、重送同一個簽章被拒（計數器沒變大）、拿別的挑戰值的回答被拒、單獨登入沒有 UV 被拒、當第二步時沒有 UV 可通過、`excludeCredentials` 帶入已登記的 passkey。瀏覽器端片段只對照了 `@simplewebauthn/browser` v14 的型別定義，沒有在瀏覽器裡跑。
+兩份伺服器端片段都用同一個軟體驗證器（ES256、`none` 認證）實測：登記成功（含沒有 UV 的金鑰）、來源不對被拒、格式錯回 None、免密碼登入成功、重送同一個簽章被拒（計數器沒變大）、拿別的挑戰值的回答被拒、單獨登入沒有 UV 被拒、當第二步時沒有 UV 可通過、`excludeCredentials` 帶入已登記的 passkey。瀏覽器端片段只對照了 `@simplewebauthn/browser` v14 的型別定義，沒有在瀏覽器裡跑。

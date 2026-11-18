@@ -119,7 +119,7 @@ SvelteKit：`cookies.set(SESSION_COOKIE, token, { path: '/', httpOnly: true, sam
 | `Referrer-Policy` | `same-origin` | 點外部連結時不把後台網址告訴別的網站 |
 | `Strict-Transport-Security` | `max-age=31536000`，只在 HTTPS 回應 | 一年內瀏覽器只用 HTTPS 連這個主機名稱；http 回應帶了也沒用，本機 http 測試才不受影響 |
 
-使用者上傳的檔案原本就帶的 CSP（例如 `sandbox`）放在前面保留，不要被蓋掉。
+回應原本就帶的 CSP（例如使用者上傳的檔案用 `sandbox`）要保留：另外加一條 CSP 標頭（Python `response.headers.append`、`Headers.append`），瀏覽器會同時執行兩條政策；用 set 蓋掉它，上傳的 HTML 就能跑 script。
 
 ```ts
 // security-headers.ts
