@@ -13,9 +13,9 @@ description: Use when adding or reviewing login protection for a web app (FastAP
 
 | 順序 | 防線 | 為什麼放這裡 | 參考檔 |
 |---|---|---|---|
-| 1 | 反向代理只放台灣與內網（GeoIP） | 國外的流量連登入頁都看不到；程式出錯也不會漏 | [ip-limit.md](references/ip-limit.md) |
-| 2 | 程式只接受代理與本機的連線，真實 IP 只信代理轉來的 | 能繞過代理直連，第 1 層就白做；能偽造 IP，第 5、7 層就失準 | [ip-limit.md](references/ip-limit.md) |
-| 3 | 程式內 GeoIP（備案） | 沒有可設定的代理、或要多一層時才做 | [ip-limit.md](references/ip-limit.md) |
+| 1 | 反向代理只放台灣與內網（GeoIP） | 國外的流量連登入頁都看不到；程式出錯也不會漏 | [proxy-geoip.md](references/proxy-geoip.md) |
+| 2 | 程式只接受代理與本機的連線，真實 IP 只信代理轉來的 | 能繞過代理直連，第 1 層就白做；能偽造 IP，第 5、7 層就失準 | [client-ip.md](references/client-ip.md) |
+| 3 | 程式內 GeoIP（備案） | 沒有可設定的代理、或要多一層時才做 | [app-geoip.md](references/app-geoip.md) |
 | 4 | 密碼 → 第二步（TOTP 或 passkey）；passkey 也可以單獨登入 | 台灣境內的人仍連得到登入頁，真正的防線在這裡 | [two-step-login.md](references/two-step-login.md)、[passkeys.md](references/passkeys.md) |
 | 5 | 連續失敗鎖定，所有步驟共用一個計數 | 擋猜密碼，也擋「密碼對了再猜六位數」 | [two-step-login.md](references/two-step-login.md) |
 | 6 | 登入後的 session：期限、作廢、Cookie 屬性、安全標頭 | 登入成果只存在 Cookie 裡，要防被偷、被嵌入、被跨站使用 | [session-and-headers.md](references/session-and-headers.md) |

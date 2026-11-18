@@ -109,7 +109,7 @@ SvelteKit：`cookies.set(SESSION_COOKIE, token, { path: '/', httpOnly: true, sam
 
 ## 安全標頭
 
-**每個回應都要有**：頁面、API、靜態檔、403、轉址、框架自己的錯誤頁。放在最外層（[ip-limit.md](ip-limit.md) 的自訂伺服器或中介層），SvelteKit 另在 `handle` 補一次。
+**每個回應都要有**：頁面、API、靜態檔、403、轉址、框架自己的錯誤頁。放在最外層（[client-ip.md](client-ip.md) 的自訂伺服器或中介層），SvelteKit 另在 `handle` 補一次。
 
 | 標頭 | 值 | 理由 |
 |---|---|---|

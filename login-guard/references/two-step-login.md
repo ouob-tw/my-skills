@@ -227,7 +227,7 @@ def step_key(request: Request) -> str | None:
 @router.post("/api/login")
 async def password_step(request: Request):
     body = await request.json()
-    ip = request.state.client_ip  # 入口算好的真實 IP（ip-limit.md）
+    ip = request.state.client_ip  # 入口算好的真實 IP（client-ip.md）
     if wait := limit.admit(ip):
         return locked(wait)
     if not totp_configured():

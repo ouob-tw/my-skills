@@ -6,7 +6,7 @@
 
 **網址**
 
-- **只在一個 HTTPS 網址上用**：設定一個正式網址（例如 `https://admin.example.com`），RP ID 是它的主機名稱，驗證時 `expectedOrigin` 與 `expectedRPID` 都只接受它。用 http、IP 或其他網址打開時，所有 passkey 端點回 409 `passkey_unavailable`（不算失敗次數），頁面說明原因並改用 TOTP。是不是 HTTPS 用入口算好的值（[ip-limit.md](ip-limit.md)），不看 `request.url`。
+- **只在一個 HTTPS 網址上用**：設定一個正式網址（例如 `https://admin.example.com`），RP ID 是它的主機名稱，驗證時 `expectedOrigin` 與 `expectedRPID` 都只接受它。用 http、IP 或其他網址打開時，所有 passkey 端點回 409 `passkey_unavailable`（不算失敗次數），頁面說明原因並改用 TOTP。是不是 HTTPS 用入口算好的值（[client-ip.md](client-ip.md)），不看 `request.url`。
 - 頁面先在瀏覽器確認 `location.origin` 等於正式網址、`window.isSecureContext`、有 WebAuthn（`browserSupportsWebAuthn()`），不符合就只顯示原因，不顯示可按的按鈕。
 
 **挑戰值（challenge）**
