@@ -20,7 +20,7 @@
 - **登入後在設定登記**：已登入的 session 不需要登記碼，直接新增。
 - **第一次還沒有任何能登入的裝置時**：用主機指令產生一次性登記碼（10 分鐘、用一次就失效、只存雜湊，新的取代舊的），登記時要密碼加登記碼。登記不發登入 Cookie。只要已經設好任何一種第二步，登入頁就不再顯示登記入口。
 - `excludeCredentials` 帶已登記的 passkey，同一台裝置不會重複登記。瀏覽器回 `InvalidStateError` 時，頁面直接說「這台裝置已經有 passkey，直接用它登入」，不要只說失敗。
-- 登記用 `userVerification: 'preferred'`，驗證登記時不要求 UV（使用者驗證：PIN、指紋或螢幕鎖），沒有 PIN 的實體安全金鑰才登記得進來、當第二步用。免密碼登入是否安全由**登入時**的 UV 檢查保證，不靠登記時；`residentKey: 'preferred'` 一定要寫：沒寫等於「不需要可探索憑證」，瀏覽器只會開系統自己的安全金鑰視窗（USB、NFC、掃 QR），Bitwarden 等密碼管理器就算設為系統預設也收不到登記請求；`attestationType: 'none'`。
+- 登記用 `userVerification: 'preferred'`，驗證登記時不要求 UV（使用者驗證：PIN、指紋或螢幕鎖），沒有 PIN 的實體安全金鑰才登記得進來、當第二步用。免密碼登入是否安全由**登入時**的 UV 檢查保證，不靠登記時；`residentKey: 'preferred'` 一定要寫：沒寫等於「不需要可探索憑證」，瀏覽器可能只開系統自己的安全金鑰視窗（USB、NFC、掃 QR），Bitwarden 等密碼管理器就算設為系統預設也可能收不到登記請求（實測發生過）；`attestationType: 'none'`。
 - `userID` 用每個使用者固定的隨機位元組，不要放 email 或資料庫編號：它會存在驗證器上。
 - 存：credential ID、公鑰（base64url）、簽章計數器、transports、登記時的 User-Agent（顯示名稱用）、登記與最後使用時間。設定頁只回傳顯示用欄位，credential ID 與公鑰留在伺服器。
 - 設定頁登記失敗不要回 401：前端通常把 401 當成「已登出」而重新載入。用 400 `passkey_failed`、410 `enroll_expired`。
