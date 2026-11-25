@@ -41,6 +41,7 @@ description: Use when adding or reviewing login protection for a web app (FastAP
 - 密碼對了就清除失敗計數，攻擊者每猜一次 TOTP 前先送一次正確密碼，就永遠不會被鎖。
 - `pyotp` 的 `verify()` 只回答對錯，不告訴你是哪一步，做不到「每組只能用一次」。
 - py_webauthn 的 `require_user_verification` 預設 `False`，SimpleWebAuthn 預設 `true`：免密碼登入一定要明確開。
+- py_webauthn 的 `generate_registration_options` 不傳 `authenticator_selection` 就不會送 `residentKey`，手寫登記選項也一樣；漏了的結果是密碼管理器收不到登記請求，只看到安全金鑰／QR 視窗。
 - `SameSite=Strict` 的登入 Cookie 在從別的網站或主畫面捷徑打開時不會送出，看起來像被登出。
 - 清除 Cookie 時沒帶 `Secure`（設定時有帶），瀏覽器會忽略這個清除。
 - 同一個主機名稱上的兩個服務用同名 Cookie 會互相蓋掉登入（Cookie 不分 port）。
